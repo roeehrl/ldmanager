@@ -76,8 +76,12 @@ Requires macOS 26 or later.
 
 ## Install
 
-A signed and notarized download and a Homebrew cask come with the first release. Until
-then, build it from source — it takes about a minute.
+**[Download LD Manager for Mac](https://github.com/roeehrl/ldmanager/releases/latest/download/LD-Manager.dmg)**
+(macOS 26 or later). It is signed and notarized by Apple: open the disk image and
+drag LD Manager to Applications. The `ldm` command is inside the app; install it
+from **Settings → Command-line tool**, or download
+[`ldm-macos.zip`](https://github.com/roeehrl/ldmanager/releases/latest/download/ldm-macos.zip)
+on its own. Every release lists SHA-256 checksums.
 
 ### From source
 
@@ -93,6 +97,10 @@ app, **Settings → Command-line tool** links it into `/usr/local/bin`.
 The script signs with your first *Developer ID Application* or *Apple Development*
 certificate (hardened runtime, ready to notarize), or with `SIGN_IDENTITY` if set.
 `SIGN_IDENTITY=-` signs ad-hoc; everything works except the privileged helper.
+
+To make a release (sign, notarize, staple, disk image, standalone `ldm` and
+checksums in `build/release`), run `scripts/release.sh` with App Store Connect API
+key credentials or a notarytool profile; see the top of the script.
 
 The CLI also builds on its own:
 
