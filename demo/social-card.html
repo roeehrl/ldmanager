@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8">
+<!-- LD Manager social card. Render: see demo/README.md (headless Chrome, 1280x640 light / 1200x630 dark). -->
+<!-- Template: social preview / Open Graph card. Fill the PLACEHOLDERS, then open as
+     social-card.html?w=1280&h=640&theme=light (GitHub social preview) or ?w=1200&h=630&theme=dark
+     (Open Graph / codonic.dev) and screenshot at exactly that size:
+       Chrome --headless=new --hide-scrollbars --window-size=W,H --virtual-time-budget=6000 \
+         --allow-file-access-from-files --screenshot=out.png "file://…/social-card.html?w=…"
+     (Chrome may not exit after writing the file: run it in the background, wait for the file,
+     then kill it and its helpers by --user-data-dir.)
+     Rules: the product's own logo only — no vendor/partner logos (trademarks); the shot is a
+     real screen of the product with demo data; text readable at 600 px wide. -->
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f6f5f1;--ink:#1d1c19;--sub:#4f4c45;--accent:#1f5fd6;--chip:#e3ecfb;--line:#d3dbe8}
+:root.dark{--bg:#10131a;--ink:#ecebe5;--sub:#a3a69f;--accent:#6ea2ff;--chip:#182a4a;--line:#2b3446}
+html,body{margin:0;overflow:hidden}
+body{background:var(--bg);font-family:'IBM Plex Sans',system-ui,sans-serif;color:var(--ink);display:flex;box-sizing:border-box}
+.left{width:46%;padding:0 0 0 64px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:20px;position:relative;z-index:1}
+.name{display:flex;align-items:center;gap:18px;font-family:'IBM Plex Mono',monospace;font-size:52px;font-weight:500;letter-spacing:-1px}
+.name img{width:72px;height:72px}
+.tag{font-size:33px;line-height:1.22;font-weight:600;letter-spacing:-.3px}
+.flow{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;flex-wrap:wrap}
+.flow b{padding:7px 13px;border-radius:9px;background:var(--chip);color:var(--accent);font-weight:600}
+.flow em{font-style:normal;padding:6px 12px;border-radius:9px;border:1.5px dashed var(--accent);color:var(--accent);font-weight:500}
+.sub{font-size:19px;line-height:1.45;color:var(--sub);max-width:520px}
+.pills{display:flex;gap:8px;flex-wrap:wrap}
+.pills span{font-size:15px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);color:var(--sub)}
+.right{flex:1;position:relative}
+.shot{position:absolute;left:-10px;top:50%;transform:translateY(-50%);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.28)}
+</style></head><body>
+<div class="left">
+  <div class="name"><img src="../docs/assets/icon.png" alt="">LD Manager</div>
+  <div class="tag">See why your launchd jobs aren’t running, and fix them.</div>
+  <div class="flow"><b>The Doctor</b><b>Lossless editing</b><b>ldm CLI</b></div>
+  <div class="sub">Every LaunchAgent and LaunchDaemon, every layer of its status, exit codes in plain words. Diff and backup on every save.</div>
+  <div class="pills"><span>macOS 26+</span><span>native SwiftUI</span><span>free &amp; open source</span></div>
+</div>
+<div class="right"><img class="shot" id="shot" alt=""></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const w = +(q.get("w") || 1280), h = +(q.get("h") || 640), theme = q.get("theme") || "light";
+  document.documentElement.classList.toggle("dark", theme === "dark");
+  document.body.style.width = w + "px"; document.body.style.height = h + "px";
+  const shot = document.getElementById("shot");
+  shot.src = "../docs/assets/hero-" + theme + ".png";
+  shot.style.width = Math.round(w * 0.66) + "px";
+</script>
+</body></html>

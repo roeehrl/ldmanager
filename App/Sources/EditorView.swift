@@ -256,6 +256,7 @@ struct EditorView: View {
         case .edit(let job): _draft = State(initialValue: EditorDraft(job: job))
         case .new: _draft = State(initialValue: EditorDraft(job: nil))
         }
+        DemoHooks.prepare(_draft.wrappedValue)
     }
 
     var body: some View {

@@ -1,38 +1,85 @@
-# LD Manager
+<p align="center">
+  <img src="docs/assets/icon.png" width="112" alt="LD Manager icon">
+</p>
 
-[![CI](https://github.com/roeehrl/ldmanager/actions/workflows/ci.yml/badge.svg)](https://github.com/roeehrl/ldmanager/actions/workflows/ci.yml)
+<h1 align="center">LD Manager</h1>
 
-A native macOS app and command-line tool for seeing, diagnosing and managing
-**launchd** jobs: your LaunchAgents, agents for all users, and system LaunchDaemons.
+<p align="center">
+  <b>See why your launchd jobs aren’t running — and fix them.</b><br>
+  A free, open-source, native macOS app and CLI for LaunchAgents and LaunchDaemons.
+</p>
 
-It answers the question every launchd user eventually asks — *why isn't my job
-running?* — in plain language, and never loses a key when it edits a plist.
+<p align="center">
+  <a href="https://github.com/roeehrl/ldmanager/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/roeehrl/ldmanager/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-blue"></a>
+  <img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-black?logo=apple">
+  <img alt="Swift 6.2" src="https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white">
+  <img alt="SwiftUI" src="https://img.shields.io/badge/UI-SwiftUI-0A84FF">
+</p>
 
-- **One view of every layer.** For each job: the plist on disk, whether launchd has
-  it loaded, its persistent enable/disable override, its PID, launch count and last
-  exit code, and its **App Background Activity** switch in Login Items — joined into
-  a single status (running, waiting, failed, disabled, off in Login Items, not
-  loaded, invalid).
-- **The Doctor.** Checks every job for invalid plists, missing Labels, missing or
-  non-executable programs, quarantined programs, unexpanded `~`, wrong ownership or
-  permissions, missing log folders, restart loops, jobs that are enabled but not
-  loaded, and failed runs — then offers a fix for each.
-- **Readable schedules.** `StartCalendarInterval {Weekday 1, Hour 9, Minute 30}` is
-  shown as *Mondays at 09:30*, with the next run times.
-- **Exit codes explained.** `78` → *EX_CONFIG: usually a missing or non-executable
-  program*; `-15` → *killed by SIGTERM*.
-- **Lossless editing.** A plain-language form, a Keys view and a raw XML editor.
-  Changes are applied to the file's own dictionary, so keys the form doesn't know
-  about survive. Every save shows a diff first and keeps a backup you can restore
-  from *Recent Changes*.
-- **Menu bar extra** with a problem count and on/off switches for pinned jobs.
-- **Optional privileged helper.** Approve it once and system daemons, `/Library`
-  plists and Login Items checks stop asking for your password.
-- **`ldm`**, a CLI built on the same core, with `--json` output and documented exit codes.
+<p align="center">
+  <a href="#what-it-does">What it does</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#the-ldm-command">CLI</a> ·
+  <a href="#why-not-launchcontrol-lingon-or-launchctl">Why not…?</a> ·
+  <a href="#faq">FAQ</a> ·
+  <a href="#contributing">Contributing</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/hero.gif" width="880" alt="A failed job in LD Manager: the inspector shows exit 78 because the program is missing, the Doctor offers the fix, the editor shows a one-line diff, and the job turns green">
+  <br><sub>A job fails with exit 78; LD Manager shows why, the Doctor offers the fix, the editor shows the diff, and the job runs. All data in these images is made up.</sub>
+</p>
+
+`launchctl` tells you `Bootstrap failed: 5: Input/output error` and leaves you to guess.
+LD Manager reads every layer launchd has — the plist on disk, whether it's loaded, the
+enable/disable override, the Login Items switch, the PID, the launch count and the last
+exit code — and tells you in plain words what's wrong and how to fix it.
+
+## What it does
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.png">
+  <img src="docs/assets/hero-light.png" alt="LD Manager's main window: a table of launch jobs with their status, schedule, runs and last result, and an inspector showing every layer of the selected job's state">
+</picture>
+
+- **See every job and its real state.** Your agents, agents for all users, system
+  daemons and (read-only) Apple's own — each with one status joined from every layer:
+  running, waiting, failed, disabled, off in Login Items, not loaded or invalid.
+- **Find out why it fails.** The Doctor checks for invalid plists, missing Labels,
+  missing, non-executable or quarantined programs, an unexpanded `~`, wrong ownership or
+  permissions, missing log folders, restart loops, jobs enabled but not loaded, and
+  failed runs — and offers a fix for each.
+- **Read schedules and exit codes like a person.** `StartCalendarInterval {Weekday 1,
+  Hour 9, Minute 30}` is *Mondays at 09:30*, with the next runs. `78` is *EX_CONFIG:
+  usually a missing or non-executable program*; `-15` is *killed by SIGTERM*.
+- **Edit without losing a key.** A plain-language form, a Keys view and raw XML. Changes
+  are applied to the file's own dictionary, so keys the form doesn't know survive. Every
+  save shows a diff first and keeps a backup you can restore from *Recent Changes*.
+- **Start, stop, enable, disable, load, unload** — with a switch, a menu-bar extra for
+  pinned jobs, or `ldm`.
+- **Script it.** `ldm` is the same core as a CLI, with `--json`, `--dry-run` that prints
+  the exact `launchctl` commands, and documented exit codes.
+
+<table>
+  <tr>
+    <td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/doctor-dark.png"><img src="docs/assets/doctor-light.png" alt="The Doctor: a list of jobs that need attention and, for the selected one, each check, the evidence and a fix button"></picture><br><b>The Doctor</b> explains the failure and offers the fix.</td>
+    <td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/editor-dark.png"><img src="docs/assets/editor-light.png" alt="The editor: a form for program, schedule and log file, with a diff of the one changed key at the bottom"></picture><br><b>Lossless editing</b>: see the diff before you save.</td>
+  </tr>
+  <tr>
+    <td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/recent-dark.png"><img src="docs/assets/recent-light.png" alt="Recent Changes: a list of plist backups with Show and Restore buttons"></picture><br><b>Recent Changes</b>: every save keeps a backup.</td>
+    <td width="50%"><img src="docs/assets/cli.png" alt="Terminal running ldm list, ldm doctor and ldm explain 78"><br><b><code>ldm</code></b>: the same Doctor in your terminal.</td>
+  </tr>
+</table>
 
 Requires macOS 26 or later.
 
-## Build
+## Install
+
+A signed and notarized download and a Homebrew cask come with the first release. Until
+then, build it from source — it takes about a minute.
+
+### From source
 
 You need Xcode 26 and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
@@ -54,6 +101,16 @@ swift build -c release --product ldm
 ```
 
 Run the tests with `swift test`.
+
+### Quick start with `ldm`
+
+```bash
+ldm list --status problems     # jobs that need attention
+ldm doctor report              # why "report" fails, and how to fix it
+ldm explain 78                 # what an exit code means
+ldm new backup --every 1h -- ~/bin/backup.sh
+ldm logs backup -f
+```
 
 ## The `ldm` command
 
@@ -87,6 +144,42 @@ password each time, so without the flag `ldm` uses the last result it read.
 | 4 | Administrator authorization needed or cancelled |
 | 5 | launchd rejected the operation |
 | 6 | `doctor` found problems |
+
+## Why not LaunchControl, Lingon or launchctl?
+
+- **LaunchControl** is the most complete launchd tool and worth its price if you live in
+  launchd. LD Manager is free and open source, explains things in plainer language, and
+  has a scriptable CLI with JSON output. LaunchControl has more expert features today.
+- **Lingon** makes creating jobs easy but shows less of why one isn't running.
+  LD Manager is built around that question.
+- **KnockKnock / BlockBlock** show what persists on your Mac and alert on new items, for
+  security. They don't edit, start or diagnose jobs. Use them together.
+- **System Settings › Login Items** only has on/off switches for registered items: no
+  schedules, logs, exit codes or editing.
+- **`launchctl` and a text editor** work if you know launchd well. LD Manager translates
+  the errors, shows the exact commands (`--dry-run`) and keeps a backup of every edit.
+- **`brew services`** only manages Homebrew formulae.
+
+## FAQ
+
+**Is it safe to edit system jobs with it?**
+Every save shows a diff and keeps a backup first; Apple's jobs on the sealed system volume
+are read-only; changes to system daemons and `/Library` go through macOS's administrator
+prompt or the optional helper you approve once.
+
+**Does it send anything anywhere?**
+No. It makes no network connections and has no analytics. It reads launchd's state with
+`launchctl` and your plist files on disk.
+
+**Why does it need macOS 26?**
+It uses the current SwiftUI and the Login Items (Background Task Management) behaviour of
+recent macOS. Supporting older versions is open for discussion — see Contributing.
+
+**Why not the Mac App Store?**
+Sandboxed apps can't drive `launchctl` or read other apps' launch jobs.
+
+**What does "LD" stand for?**
+launchd.
 
 ## How it works
 
@@ -140,14 +233,27 @@ Sources/LDManagerHelper  the privileged helper (XPC, runs as root)
 App/             the SwiftUI app (XcodeGen project.yml, Sources, Resources)
 Tests/           unit tests for the parsers, schedules, editing and the Doctor
 scripts/         app bundle build script and icon renderer
-docs/            research notes behind the design
+demo/            the invented demo world and the scripts that make the screenshots
+docs/            research notes behind the design; docs/assets has the README images
 ```
 
-## Not yet done
+## Contributing
 
-- Notifications when something adds or changes a launch job, and a timeline of
-  upcoming runs.
+Issues and pull requests are welcome — bug reports with the output of `ldm show <job>
+--json` help most. Good places to start are issues labelled
+[`good first issue`](https://github.com/roeehrl/ldmanager/labels/good%20first%20issue) and
+[`help wanted`](https://github.com/roeehrl/ldmanager/labels/help%20wanted).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the 60-second setup, and
+[`demo/`](demo/README.md) for the invented demo world the screenshots come from, so you
+never need to touch your own launch jobs to test a change.
+
+## Roadmap
+
+- Notifications when something adds or changes a launch job, and a timeline of upcoming runs.
+- A Background Items explorer: owner app, Team ID, orphaned items.
+- Shortcuts actions and templates for common jobs.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). LaunchControl, Lingon, KnockKnock and BlockBlock are
+products of their respective owners; LD Manager is not affiliated with them or with Apple.
