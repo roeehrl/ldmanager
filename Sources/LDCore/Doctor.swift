@@ -16,6 +16,7 @@ public enum Fix: Hashable, Codable, Sendable {
     case removeQuarantine(path: String)
     case createDirectory(path: String)
     case fixPermissions
+    case openLoginItems
 
     public var title: String {
         switch self {
@@ -28,6 +29,7 @@ public enum Fix: Hashable, Codable, Sendable {
         case .removeQuarantine: "Remove quarantine"
         case .createDirectory: "Create folder"
         case .fixPermissions: "Fix owner & permissions"
+        case .openLoginItems: "Open Login Items settings"
         }
     }
 
@@ -42,6 +44,7 @@ public enum Fix: Hashable, Codable, Sendable {
         case .removeQuarantine: "Clear the quarantine flag so launchd can run it."
         case .createDirectory(let p): "Create \((p as NSString).abbreviatingWithTildeInPath) so launchd can write the log."
         case .fixPermissions: "Set the owner and mode launchd requires."
+        case .openLoginItems: "Turn it back on under Allow in the Background. Only you can change this switch."
         }
     }
 }
@@ -200,7 +203,20 @@ public enum Doctor {
         // Runtime checks only matter for jobs meant to run.
         if !job.isDisabled {
             check("enabled", "Enabled in launchd", true)
-            if !job.isLoaded && def.schedule.hasTrigger && def.declaredLabel != nil {
+            if let bg = job.background {
+                if bg.isOn {
+                    check("background", "Allowed in the Background", true)
+                } else {
+                    check("background", "Allowed in the Background", false, bg.summary)
+                    find("background", .error,
+                         bg.isAllowed ? "It’s switched off in Login Items" : "A policy blocks it from running in the background",
+                         bg.isAllowed
+                            ? "launchd has it enabled, but System Settings → General → Login Items & Extensions → Allow in the Background has it switched off, so macOS won’t let it run."
+                            : "A management profile or system policy disallows it in Background Items, so macOS won’t let it run.",
+                         bg.isAllowed ? [.openLoginItems] : [])
+                }
+            }
+            if !job.isLoaded && def.schedule.hasTrigger && def.declaredLabel != nil && !job.isBlockedInBackground {
                 find("loaded", .warning, "It isn’t loaded", "The job is enabled but not loaded in launchd, so its triggers do nothing until it’s loaded or you log in again.", [.load])
             }
             if let code = job.lastExit, code != 0 {

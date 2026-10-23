@@ -7,10 +7,15 @@ public enum Inventory {
         /// Run `launchctl print` per job for runs/last-exit detail. Skipped for
         /// Apple jobs unless asked, since there are hundreds of them.
         public var details: Bool
+        /// Join Background Task Management records ("Allow in the Background").
+        /// Off by default: reading them takes seconds, so callers cache a snapshot.
+        public var background: BackgroundItems.Snapshot?
 
-        public init(scopes: [JobScope] = [.user, .allUsers, .system], details: Bool = true) {
+        public init(scopes: [JobScope] = [.user, .allUsers, .system], details: Bool = true,
+                    background: BackgroundItems.Snapshot? = nil) {
             self.scopes = scopes
             self.details = details
+            self.background = background
         }
 
         public static let all = Options(scopes: JobScope.allCases)
@@ -49,19 +54,22 @@ public enum Inventory {
             if listing != nil, options.details, !def.scope.isApple {
                 detail = Launchctl.detail(target: "\(domain)/\(def.label)")
             }
-            let job = Job(definition: def, listing: listing, detail: detail, override: overrides[domain]?[def.label])
+            var job = Job(definition: def, listing: listing, detail: detail, override: overrides[domain]?[def.label])
+            job.background = options.background?.item(for: job)
             lock.lock(); jobs[i] = job; lock.unlock()
         }
         return jobs.compactMap { $0 }
     }
 
-    /// Reloads one job, with full detail.
-    public static func reload(_ job: Job) -> Job {
+    /// Reloads one job, with full detail. Keeps its Background Items record unless given a fresh snapshot.
+    public static func reload(_ job: Job, background: BackgroundItems.Snapshot? = nil) -> Job {
         let def = JobDefinition.load(url: job.definition.url, scope: job.scope)
         let domain = job.scope.domain
         let listing = Launchctl.services(in: domain)[def.label]
         let detail = listing != nil ? Launchctl.detail(target: "\(domain)/\(def.label)") : nil
-        return Job(definition: def, listing: listing, detail: detail, override: Launchctl.disabledOverrides(in: domain)[def.label])
+        var fresh = Job(definition: def, listing: listing, detail: detail, override: Launchctl.disabledOverrides(in: domain)[def.label])
+        fresh.background = background.map { $0.item(for: fresh) } ?? job.background
+        return fresh
     }
 
     /// Finds jobs by exact label, label suffix, file name, or substring.

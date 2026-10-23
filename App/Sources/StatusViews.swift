@@ -21,6 +21,7 @@ struct StatusGlyph: View {
         case .idle: "circle"
         case .failed: "exclamationmark.triangle.fill"
         case .disabled: "pause.circle"
+        case .blocked: "nosign"
         case .notLoaded: "circle.dashed"
         case .invalid: "questionmark.diamond.fill"
         }
@@ -30,7 +31,7 @@ struct StatusGlyph: View {
         switch status {
         case .running: .green
         case .idle, .disabled, .notLoaded: .secondary
-        case .failed: .orange
+        case .failed, .blocked: .orange
         case .invalid: .purple
         }
     }
@@ -75,7 +76,7 @@ struct Chip: View {
 extension Job {
     var resultColor: Color {
         switch status {
-        case .failed: .orange
+        case .failed, .blocked: .orange
         case .invalid: .purple
         default: .secondary
         }

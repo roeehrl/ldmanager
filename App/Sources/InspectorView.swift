@@ -109,6 +109,7 @@ struct InspectorView: View {
                      value: job.definition.parseError == nil ? (job.definition.declaredLabel == nil ? "No Label key" : "Valid · \(Doctor.abbreviate(job.definition.url.deletingLastPathComponent().path))") : "Invalid")
             layerRow("launchd override", passed: job.override.map { !$0 }, value: job.override.map { $0 ? "Disabled" : "Enabled" } ?? "None (uses plist)")
             layerRow("Loaded", passed: job.isLoaded ? true : nil, value: job.isLoaded ? "Yes · \(job.target)" : "No")
+            backgroundRow
             let program = Doctor.diagnose(job).checks.first { $0.id == "program" }
             layerRow("Program", passed: program?.passed, value: program?.passed == false ? (program?.note ?? "Problem") : (program?.passed == true ? "Exists, executable" : "—"))
             if let e = job.lastExit {
@@ -116,6 +117,31 @@ struct InspectorView: View {
                     .help(ExitCode.explain(e))
             }
             if let r = job.runs { layerRow("Launches", passed: nil, value: r.formatted()) }
+        }
+    }
+
+    @ViewBuilder var backgroundRow: some View {
+        if let snap = model.background {
+            let bg = job.background
+            layerRow("Allow in the Background", passed: bg.map(\.isOn), value: bg?.summary ?? "Not listed")
+                .help("Login Items & Extensions, as of \(snap.date.formatted(.relative(presentation: .named))). "
+                      + (bg == nil ? "macOS hasn’t recorded this job yet; it usually appears after it first loads." : ""))
+            if let bg, !bg.isOn {
+                Button("Open Login Items Settings") { model.openLoginItemsSettings() }
+                    .controlSize(.small)
+                    .padding(.leading, 22)
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                CheckMark(passed: nil).font(.callout)
+                Text("Allow in the Background")
+                Spacer(minLength: 12)
+                Button(model.isCheckingBackground ? "Checking…" : "Check…") { model.checkLoginItems() }
+                    .controlSize(.small)
+                    .disabled(model.isCheckingBackground)
+                    .help("Reads Login Items & Extensions. macOS asks for your password.")
+            }
+            .font(.callout)
         }
     }
 

@@ -33,13 +33,29 @@ struct Common: ParsableArguments {
     @Flag(help: "Output JSON (stable for scripts).") var json = false
     @Flag(name: .customLong("no-color"), help: "Disable colors.") var noColor = false
     @Flag(help: "Include Apple's jobs on the system volume.") var apple = false
+    @Flag(help: "Re-read Login Items › Allow in the Background. macOS asks for your password; otherwise the last result is used.")
+    var background = false
 
     func setup() { if noColor { Style.enabled = false } }
+
+    /// Background Items: freshly read (one password prompt) with --background, otherwise the cached result.
+    func backgroundSnapshot() -> BackgroundItems.Snapshot? {
+        if background {
+            if let fresh = BackgroundItems.refresh() { return fresh }
+            printErr(Style.orange("note: ") + "couldn’t read Login Items (cancelled?); using the last result.")
+        }
+        return BackgroundItems.cached()
+    }
 
     func loadJobs(details: Bool = true) -> [Job] {
         var scopes: [JobScope] = [.user, .allUsers, .system]
         if apple { scopes += [.appleAgent, .appleDaemon] }
-        return Inventory.load(.init(scopes: scopes, details: details))
+        return Inventory.load(.init(scopes: scopes, details: details, background: backgroundSnapshot()))
+    }
+
+    /// Resolves a name and reloads the job with every layer.
+    func resolveFull(_ name: String) throws -> Job {
+        Inventory.reload(try resolve(name), background: backgroundSnapshot())
     }
 
     func resolve(_ name: String) throws -> Job {
@@ -87,7 +103,7 @@ struct List: ParsableCommand {
         case .all: break
         case .running: jobs = jobs.filter { $0.status == .running }
         case .failed: jobs = jobs.filter { $0.status == .failed || $0.status == .invalid }
-        case .disabled: jobs = jobs.filter { $0.status == .disabled }
+        case .disabled: jobs = jobs.filter { $0.status == .disabled || $0.status == .blocked }
         case .problems:
             let labels = Set(LDCore.Doctor.problems(in: jobs).map(\.job.id))
             jobs = jobs.filter { labels.contains($0.id) }
@@ -116,7 +132,7 @@ struct Show: ParsableCommand {
     func run() throws {
         common.setup()
         try guarded {
-            let job = Inventory.reload(try common.resolve(name))
+            let job = try common.resolveFull(name)
             if common.json { return emitJSON(JobJSON(job)) }
             let d = job.definition
             print(Style.bold(job.title) + "  " + Style.dim(job.label))
@@ -129,6 +145,12 @@ struct Show: ParsableCommand {
             let next = d.schedule.nextRuns(count: 3)
             if !next.isEmpty { row("next", next.map { $0.formatted(date: .abbreviated, time: .shortened) }.joined(separator: " · ")) }
             row("override", job.override.map { $0 ? "disabled" : "enabled" } ?? "none")
+            if let snap = BackgroundItems.cached() {
+                row("background", (job.background.map { b in b.summary + (b.owner.map { " · \($0)" } ?? "") } ?? "not listed in Login Items")
+                    + Style.dim("  (read \(snap.date.formatted(.relative(presentation: .named))))"))
+            } else {
+                row("background", Style.dim("not read yet — run with --background (asks for your password)"))
+            }
             if let r = job.runs { row("launches", r.formatted()) }
             if let e = job.lastExit { row("last exit", ExitCode.explain(e)) }
             for p in LogReader.logPaths(for: job) { row("log", LDCore.Doctor.abbreviate(p)) }
@@ -150,7 +172,7 @@ struct Doctor: ParsableCommand {
         try guarded {
             let diagnoses: [Diagnosis]
             if let n = name {
-                diagnoses = [LDCore.Doctor.diagnose(Inventory.reload(try common.resolve(n)))]
+                diagnoses = [LDCore.Doctor.diagnose(try common.resolveFull(n))]
             } else {
                 diagnoses = LDCore.Doctor.problems(in: common.loadJobs())
             }
@@ -187,6 +209,7 @@ struct Doctor: ParsableCommand {
         case .removeQuarantine(let p): return "xattr -d com.apple.quarantine \(Shell.quote(p))"
         case .createDirectory(let p): return "mkdir -p \(Shell.quote(p))"
         case .fixPermissions: return job.scope == .user ? "chmod 644 \(Shell.quote(job.definition.url.path))" : "sudo chown root:wheel \(Shell.quote(job.definition.url.path)) && sudo chmod 644 \(Shell.quote(job.definition.url.path))"
+        case .openLoginItems: return "open \"\(BackgroundItems.settingsURL.absoluteString)\""
         case .revealPlist: return nil
         }
     }

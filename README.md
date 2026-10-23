@@ -8,7 +8,8 @@ running?* — in plain language, and never loses a key when it edits a plist.
 
 - **One view of every layer.** For each job: the plist on disk, whether launchd has
   it loaded, its persistent enable/disable override, its PID, launch count and last
-  exit code, joined into a single status (running, waiting, failed, disabled, not
+  exit code, and its **Allow in the Background** switch in Login Items — joined into
+  a single status (running, waiting, failed, disabled, off in Login Items, not
   loaded, invalid).
 - **The Doctor.** Checks every job for invalid plists, missing Labels, missing or
   non-executable programs, quarantined programs, unexpanded `~`, wrong ownership or
@@ -57,8 +58,8 @@ Run the tests with `swift test`.
 
 ```text
 ldm list [--status failed|running|disabled|problems] [--scope user|allUsers|system] [--json|--plain]
-ldm show <job> [--json]
-ldm doctor [<job>] [--json]
+ldm show <job> [--json] [--background]
+ldm doctor [<job>] [--json] [--background]
 ldm start|stop|restart|load|unload|enable|disable <job> [--dry-run]
 ldm logs <job> [-n 40] [-f]
 ldm new <name> (--every 15m | --cron "30 9 * * 1" | --keep-alive | --watch <path>) [--log <file>] -- <program> [args…]
@@ -71,6 +72,9 @@ A job can be named by its full label, its last label component, its file name, o
 any unique part of its label. `--dry-run` prints the exact `launchctl` commands
 instead of running them. Colors are off when output isn't a terminal or `NO_COLOR`
 is set.
+
+`--background` re-reads Login Items › Allow in the Background. macOS asks for your
+password each time, so without the flag `ldm` uses the last result it read.
 
 | Exit code | Meaning |
 |---|---|
@@ -90,6 +94,14 @@ administrator would: `launchctl print <domain>` for each domain's services,
 job's details, and the plist files themselves. Apple documents `launchctl print`'s
 output as not being an API, so every parser ignores lines it doesn't recognise.
 
+The **Allow in the Background** switches live in Background Task Management, a
+database only root can read. There is no public API for it, so LD Manager reads it
+with `sfltool dumpbtm`, which shows an administrator prompt every time it runs.
+That's why it is only read when you ask (**Check Login Items…** in the app,
+`--background` in the CLI) and the result is cached in
+`~/Library/Caches/LDManager`. These switches can't be changed programmatically;
+the app opens the Login Items pane in System Settings instead.
+
 Changes go through `launchctl bootstrap`, `bootout`, `enable`, `disable`,
 `kickstart` and `kill`. Changes to system daemons, and writes to `/Library`, ask for
 an administrator password through macOS.
@@ -108,10 +120,8 @@ docs/            research notes behind the design
 
 ## Not yet done
 
-- A privileged helper (`SMAppService` daemon) so system-daemon changes don't ask for a
-  password each time.
-- Reading **Login Items & Extensions → Allow in the Background** state (Background
-  Task Management), the second switch that can stop a job.
+- A privileged helper (`SMAppService` daemon), approved once in System Settings, so
+  system-daemon changes and Login Items checks don't ask for a password each time.
 - Notifications when something adds or changes a launch job, and a timeline of
   upcoming runs.
 

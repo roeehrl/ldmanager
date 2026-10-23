@@ -26,6 +26,10 @@ final class AppModel {
             if sidebar == .recent { backups = PlistEditor.backups() }
         }
     }
+    /// Last "Allow in the Background" read. Reading it again prompts for a password,
+    /// so it only happens when the user clicks Check Login Items.
+    var background: BackgroundItems.Snapshot? = BackgroundItems.cached()
+    var isCheckingBackground = false
     var selectedJobID: Job.ID?
     var selectedProblemID: Diagnosis.ID?
     var search = ""
@@ -57,7 +61,8 @@ final class AppModel {
     func refresh() async {
         guard !isRefreshing else { return }
         isRefreshing = true
-        let loaded = await Task.detached(priority: .userInitiated) { Inventory.load() }.value
+        let snapshot = background
+        let loaded = await Task.detached(priority: .userInitiated) { Inventory.load(.init(background: snapshot)) }.value
         jobs = loaded
         diagnoses = await Task.detached { Doctor.problems(in: loaded) }.value
         if selectedProblemID == nil || !diagnoses.contains(where: { $0.id == selectedProblemID }) {
@@ -66,6 +71,23 @@ final class AppModel {
         if sidebar == .recent { backups = PlistEditor.backups() }
         hasLoaded = true
         isRefreshing = false
+    }
+
+    /// Reads Background Task Management. macOS shows its administrator prompt.
+    func checkLoginItems() {
+        guard !isCheckingBackground else { return }
+        isCheckingBackground = true
+        Task {
+            if let fresh = await Task.detached(priority: .userInitiated, operation: { BackgroundItems.refresh() }).value {
+                background = fresh
+            }
+            isCheckingBackground = false
+            await refresh()
+        }
+    }
+
+    func openLoginItemsSettings() {
+        NSWorkspace.shared.open(BackgroundItems.settingsURL)
     }
 
     func loadApple() async {
@@ -162,6 +184,7 @@ final class AppModel {
         case .disable: perform(.disable, on: job)
         case .load: perform(.load, on: job)
         case .chooseProgram, .editPlist: editorTarget = .edit(job)
+        case .openLoginItems: openLoginItemsSettings()
         case .revealPlist: reveal(job)
         case .openTerminal(let dir):
             NSWorkspace.shared.open([URL(fileURLWithPath: dir)], withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),

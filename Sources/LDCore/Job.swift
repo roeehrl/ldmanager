@@ -1,7 +1,7 @@
 import Foundation
 
 public enum JobStatus: String, Codable, Sendable, CaseIterable {
-    case running, idle, failed, disabled, notLoaded, invalid
+    case running, idle, failed, disabled, blocked, notLoaded, invalid
 
     public var title: String {
         switch self {
@@ -9,6 +9,7 @@ public enum JobStatus: String, Codable, Sendable, CaseIterable {
         case .idle: "Loaded, waiting"
         case .failed: "Last run failed"
         case .disabled: "Disabled"
+        case .blocked: "Off in Login Items"
         case .notLoaded: "Not loaded"
         case .invalid: "Invalid plist"
         }
@@ -19,6 +20,7 @@ public enum JobStatus: String, Codable, Sendable, CaseIterable {
         switch self {
         case .invalid: 0
         case .failed: 1
+        case .blocked: 2
         case .disabled: 2
         case .notLoaded: 3
         case .running: 4
@@ -28,20 +30,28 @@ public enum JobStatus: String, Codable, Sendable, CaseIterable {
 }
 
 /// A job as seen through every layer: the plist on disk, live launchd state,
-/// and launchd's persistent enable/disable override.
+/// launchd's persistent enable/disable override, and the Background Task
+/// Management record behind "Allow in the Background".
 public struct Job: Identifiable, @unchecked Sendable {
     public let definition: JobDefinition
     public let listing: ServiceListing?
     public let detail: ServiceDetail?
     /// true = disabled override, false = explicitly enabled, nil = no override.
     public let override: Bool?
+    /// nil when BTM wasn't read, or has no record of this job yet.
+    public var background: BackgroundItem?
 
-    public init(definition: JobDefinition, listing: ServiceListing?, detail: ServiceDetail?, override: Bool?) {
+    public init(definition: JobDefinition, listing: ServiceListing?, detail: ServiceDetail?, override: Bool?,
+                background: BackgroundItem? = nil) {
         self.definition = definition
         self.listing = listing
         self.detail = detail
         self.override = override
+        self.background = background
     }
+
+    /// Switched off in System Settings, or blocked by policy.
+    public var isBlockedInBackground: Bool { background.map { !$0.isOn } ?? false }
 
     public var id: String { definition.url.path }
     public var label: String { definition.label }
@@ -60,6 +70,7 @@ public struct Job: Identifiable, @unchecked Sendable {
     public var status: JobStatus {
         if definition.parseError != nil || definition.declaredLabel == nil { return .invalid }
         if isDisabled && !isLoaded { return .disabled }
+        if isBlockedInBackground && pid == nil { return .blocked }
         if pid != nil { return .running }
         if !isLoaded { return .notLoaded }
         if let e = lastExit, e != 0 { return .failed }
@@ -113,6 +124,7 @@ public struct Job: Identifiable, @unchecked Sendable {
         case .invalid:
             return definition.parseError != nil ? "Invalid plist" : "Invalid · no Label key"
         case .disabled: return "Disabled"
+        case .blocked: return background?.summary ?? "Off in Login Items"
         case .notLoaded: return "Not loaded"
         default: break
         }

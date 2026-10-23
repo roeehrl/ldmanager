@@ -42,6 +42,7 @@ struct Style {
         case .idle: dim("○ idle    ")
         case .failed: orange("▲ failed  ")
         case .disabled: dim("‖ disabled")
+        case .blocked: orange("⊘ blocked ")
         case .notLoaded: dim("◌ unloaded")
         case .invalid: purple("◆ invalid ")
         }
@@ -66,6 +67,8 @@ struct JobJSON: Encodable {
         let runs: Int?
         let lastExit: Int?
         let override: String
+        /// "allowed", "off", "blocked by policy", or "unknown" when not read.
+        let background: String
     }
     let label: String
     let title: String
@@ -87,7 +90,8 @@ struct JobJSON: Encodable {
         schedule = j.definition.schedule.summary
         result = j.resultSummary
         state = State(status: j.status.rawValue, loaded: j.isLoaded, running: j.pid != nil, pid: j.pid, runs: j.runs,
-                      lastExit: j.lastExit, override: j.override.map { $0 ? "disabled" : "enabled" } ?? "none")
+                      lastExit: j.lastExit, override: j.override.map { $0 ? "disabled" : "enabled" } ?? "none",
+                      background: j.background.map { !$0.isAllowed ? "blocked by policy" : $0.isEnabled ? "allowed" : "off" } ?? "unknown")
     }
 }
 

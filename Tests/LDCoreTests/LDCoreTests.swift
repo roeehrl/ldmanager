@@ -195,3 +195,82 @@ import Testing
         #expect(Doctor.diagnose(job).findings.contains { $0.headline == "Plist has no Label key" })
     }
 }
+
+@Suite struct BackgroundTaskManagement {
+    static let sample = """
+    ========================
+     Records for UID -2 : FFFFEEEE-DDDD-CCCC-BBBB-AAAAFFFFFFFE
+    ========================
+
+     ServiceManagement migrated: true
+
+     #1:
+                     UUID: 11111111-2222-3333-4444-555555555555
+                     Name: exampled
+           Developer Name: (null)
+                     Type: legacy daemon (0x10010)
+                    Flags: [ legacy ] (0x1)
+              Disposition: [enabled, disallowed, notified] (0x9)
+               Identifier: 16.com.example.daemon
+                      URL: /Library/LaunchDaemons/com.example.daemon.plist
+          Executable Path: /usr/local/bin/exampled
+        Parent Identifier: Unknown Developer
+
+    ========================
+     Records for UID 501 : 7E868DFC-65F6-41BD-8EBA-9DDA89CA4353
+    ========================
+
+     #1:
+                     UUID: AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE
+                     Name: backup
+           Developer Name: Example Corp
+          Team Identifier: ABCDE12345
+                     Type: legacy agent (0x10008)
+                    Flags: [ legacy ] (0x1)
+              Disposition: [disabled, allowed, notified] (0xa)
+               Identifier: 8.com.example.backup
+                      URL: /Users/501/Library/LaunchAgents/com.example.backup.plist
+          Executable Path: /usr/local/bin/backup
+        Parent Identifier: Example Corp
+
+     #2:
+                     UUID: AAAAAAAA-BBBB-CCCC-DDDD-FFFFFFFFFFFF
+                     Name: Example App
+           Developer Name: Example Corp
+                     Type: app (0x2)
+              Disposition: [enabled, allowed, notified] (0xb)
+               Identifier: 2.com.example.app
+                      URL: file:///Applications/Example.app/
+    """
+
+    @Test func parsesRecords() {
+        let items = BackgroundItems.parse(Self.sample)
+        #expect(items.count == 3)
+        let daemon = items[0]
+        #expect(daemon.uid == -2)
+        #expect(daemon.label == "com.example.daemon")
+        #expect(daemon.isDaemon && daemon.isLaunchJob)
+        #expect(daemon.isEnabled && !daemon.isAllowed && !daemon.isOn)
+        #expect(daemon.summary == "Blocked by policy")
+        let agent = items[1]
+        #expect(agent.uid == 501)
+        #expect(agent.typeCode == 0x10008)
+        #expect(!agent.isEnabled && agent.summary == "Off in Login Items")
+        #expect(agent.owner == "Example Corp")
+        #expect(agent.teamIdentifier == "ABCDE12345")
+        #expect(!items[2].isLaunchJob)
+    }
+
+    @Test func joinsJobsAndBlocks() {
+        let snap = BackgroundItems.Snapshot(items: BackgroundItems.parse(Self.sample), date: Date())
+        let def = JobDefinition(url: URL(fileURLWithPath: "/tmp/com.example.backup.plist"), scope: .user,
+                                raw: ["Label": "com.example.backup", "ProgramArguments": ["/bin/true"], "StartInterval": 60])
+        var job = Job(definition: def, listing: nil, detail: nil, override: nil)
+        job.background = snap.item(for: job)
+        #expect(job.background?.label == "com.example.backup")
+        #expect(job.status == .blocked)
+        let d = Doctor.diagnose(job)
+        #expect(d.findings.contains { $0.headline == "It’s switched off in Login Items" && $0.fixes == [.openLoginItems] })
+        #expect(!d.findings.contains { $0.id == "loaded" })
+    }
+}
