@@ -378,3 +378,14 @@ import Testing
         #expect(!fixes.contains { if case .openTerminal = $0 { true } else { false } })
     }
 }
+
+@Suite struct NoUnaskedPrompts {
+    /// The test runner isn't signed by LD Manager's team, so the helper never accepts it:
+    /// a read that may not prompt must fail without running sfltool.
+    @Test func backgroundReadWithoutHelperDoesNotPrompt() {
+        let r = Privileged.dumpBackgroundItems(allowPrompt: false)
+        #expect(!r.succeeded)
+        #expect(r.stderr.contains("may not prompt"))
+        #expect(BackgroundItems.refresh(allowPrompt: false) == nil)
+    }
+}

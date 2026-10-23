@@ -58,4 +58,14 @@ codesign "${FLAGS[@]}" --sign "$SIGN_IDENTITY" --identifier "$HELPER_LABEL" "$AP
 codesign "${FLAGS[@]}" --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --strict --deep "$APP"
 
+# Keep one copy: drop Xcode's intermediate app bundles and keep build/ out of
+# Spotlight and Launch Services, so they don't appear as extra "LD Manager" apps.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+for product in "$OUT"/DerivedData/Build/Products/*/"LD Manager.app"; do
+  [ -d "$product" ] || continue
+  "$LSREGISTER" -u "$product" 2>/dev/null || true
+  rm -rf "$product"
+done
+touch "$OUT/.metadata_never_index"
+
 echo "✓ $APP"

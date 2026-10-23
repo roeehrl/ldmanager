@@ -49,6 +49,7 @@ final class AppModel {
 
     init() {
         updateHelperState()
+        Task { [weak self] in await self?.checkHelperResponds() }
         refreshLoop = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
@@ -100,7 +101,8 @@ final class AppModel {
         guard helperState == .enabled, !isCheckingBackground else { return }
         if let b = background, Date().timeIntervalSince(b.date) < 60 { return }
         isCheckingBackground = true
-        if let fresh = await Task.detached(priority: .utility, operation: { BackgroundItems.refresh() }).value {
+        // Nobody asked for this read, so it must never fall back to the password prompt.
+        if let fresh = await Task.detached(priority: .utility, operation: { BackgroundItems.refresh(allowPrompt: false) }).value {
             background = fresh
             await refresh()
         }
@@ -110,7 +112,9 @@ final class AppModel {
     // MARK: Privileged helper
 
     enum HelperState: Equatable {
-        case notInstalled, needsApproval, enabled, notBundled, unsigned
+        /// `broken`: macOS reports it approved, but it doesn't answer — typically
+        /// because the app moved since it was registered.
+        case notInstalled, needsApproval, enabled, notBundled, unsigned, broken
     }
 
     var helperState: HelperState = .notInstalled
@@ -134,7 +138,7 @@ final class AppModel {
         let previous = helperState
         if HelperPolicy.currentTeamIdentifier() == nil { helperState = .unsigned; return }
         switch helperService.status {
-        case .enabled: helperState = .enabled
+        case .enabled: helperState = previous == .broken ? .broken : .enabled
         case .requiresApproval: helperState = .needsApproval
         case .notFound: helperState = .notBundled
         default: helperState = .notInstalled
@@ -146,6 +150,44 @@ final class AppModel {
             helperBannerVisible = true
         }
         if helperState == .enabled { helperRevoked = false }
+    }
+
+    @ObservationIgnored private var repairAttempted = false
+
+    /// macOS's "enabled" isn't proof the helper runs: after the app moves, the
+    /// registration still points at the old copy. Check that it answers, and if
+    /// not, register it again from this copy, once automatically per launch.
+    func checkHelperResponds() async {
+        guard helperService.status == .enabled, HelperPolicy.currentTeamIdentifier() != nil else { return }
+        HelperClient.shared.resetProbe()
+        if await Task.detached(operation: { HelperClient.shared.isAvailable }).value {
+            helperState = .enabled
+            return
+        }
+        helperState = .broken
+        guard !repairAttempted else { return }
+        repairAttempted = true
+        await repairHelper()
+    }
+
+    /// Unregisters and registers the helper again from this copy of the app.
+    func repairHelper() async {
+        try? await helperService.unregister()
+        // Registering right after unregistering can fail; macOS needs a moment.
+        try? await Task.sleep(for: .seconds(2))
+        try? helperService.register()
+        helperState = .notInstalled
+        updateHelperState()
+        HelperClient.shared.resetProbe()
+        switch helperState {
+        case .enabled:
+            let ok = await Task.detached(operation: { HelperClient.shared.isAvailable }).value
+            helperState = ok ? .enabled : .broken
+        case .needsApproval:
+            setUpHelper(then: nil)
+        default:
+            break
+        }
     }
 
     /// Runs `action`, first offering the helper when it needs root and the helper isn't on.
@@ -182,6 +224,16 @@ final class AppModel {
         case .notInstalled:
             pendingPrivileged = nil
             errorMessage = "macOS didn’t register the helper. Try again, or remove LD Manager from \(LoginItemsWording.section) and retry."
+        case .broken:
+            let action = pendingPrivileged
+            pendingPrivileged = nil
+            Task {
+                await repairHelper()
+                if let action {
+                    if helperState != .enabled { helperBannerVisible = true }
+                    action()
+                }
+            }
         }
     }
 
