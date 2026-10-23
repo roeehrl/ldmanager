@@ -40,6 +40,7 @@ struct ContentView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+        .onChange(of: model.hasLoaded) { DemoHooks.apply(to: model) }
     }
 
     @ViewBuilder var detail: some View {
