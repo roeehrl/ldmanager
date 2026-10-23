@@ -1,12 +1,12 @@
 #!/bin/bash
 # Builds a signed, notarized and stapled release of LD Manager:
 #
-#   build/release/LD-Manager.dmg     the app, with an Applications link
+#   build/release/LD-Manager.dmg     the app and an Applications link in a styled window
 #   build/release/ldm-macos.zip      the ldm command on its own
 #   build/release/SHA256SUMS.txt
 #
-# Needs a "Developer ID Application" certificate in your keychain and notarization
-# credentials, either an App Store Connect API key:
+# Needs dmgbuild (pip install dmgbuild), a "Developer ID Application" certificate in your
+# keychain, and notarization credentials, either an App Store Connect API key:
 #
 #   ASC_KEY_ID=ABC123XYZ ASC_ISSUER=<issuer uuid> scripts/release.sh
 #   (key file at ~/.appstoreconnect/private_keys/AuthKey_<ASC_KEY_ID>.p8)
@@ -68,13 +68,17 @@ notarize "$OUT/app-notarize.zip"
 rm "$OUT/app-notarize.zip"
 xcrun stapler staple "$APP"
 
-# 2. The disk image: the stapled app plus a link to Applications.
+# 2. The disk image: the stapled app and a link to Applications in a styled window
+#    (background from packaging/dmg/DMGBackground.swift, layout in packaging/dmg/settings.py),
+#    written by dmgbuild without scripting Finder.
 echo "▸ Building the disk image"
-STAGE=$(mktemp -d)
-ditto "$APP" "$STAGE/LD Manager.app"
-ln -s /Applications "$STAGE/Applications"
-hdiutil create -quiet -volname "LD Manager" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$OUT/LD-Manager.dmg"
-rm -rf "$STAGE"
+DMGBUILD="${DMGBUILD:-$(command -v dmgbuild || echo "$HOME/tools/dmgbuild-venv/bin/dmgbuild")}"
+[ -x "$DMGBUILD" ] || { echo "dmgbuild not found: python3 -m venv ~/tools/dmgbuild-venv && ~/tools/dmgbuild-venv/bin/pip install dmgbuild" >&2; exit 1; }
+mkdir -p build/dmg
+swiftc -O packaging/dmg/DMGBackground.swift -o build/DMGBackground
+build/DMGBackground build/dmg >/dev/null
+"$DMGBUILD" -s packaging/dmg/settings.py -D app="$APP" -D background=build/dmg/background.png \
+  "LD Manager" "$OUT/LD-Manager.dmg"
 codesign --force --timestamp --sign "$SIGN_IDENTITY" "$OUT/LD-Manager.dmg"
 notarize "$OUT/LD-Manager.dmg"
 xcrun stapler staple "$OUT/LD-Manager.dmg"
