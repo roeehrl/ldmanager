@@ -69,6 +69,14 @@ public struct Schedule: Sendable {
         }
     }
 
+    /// The summary for use mid-sentence: "every 30 minutes", but "Mondays at 09:30".
+    public var summaryInSentence: String {
+        let text = summary
+        let properNouns = Self.weekdayNames + Self.monthNames.filter { !$0.isEmpty }
+        if properNouns.contains(where: { text.hasPrefix($0) }) { return text }
+        return text.prefix(1).lowercased() + text.dropFirst()
+    }
+
     public static func describe(interval s: Int) -> String {
         func unit(_ n: Int, _ one: String) -> String { n == 1 ? "Every \(one)" : "Every \(n) \(one)s" }
         if s % 86400 == 0 { return unit(s / 86400, "day") }

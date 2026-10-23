@@ -98,7 +98,7 @@ struct InspectorView: View {
         case .notLoaded: "Enabled but not loaded — its triggers do nothing yet."
         case .running: "On — running now as PID \(job.pid ?? 0)."
         case .invalid: "launchd can’t load this plist."
-        default: "On — launchd starts it: \(job.definition.schedule.summary.lowercased())."
+        default: "On — launchd starts it: \(job.definition.schedule.summaryInSentence)."
         }
     }
 

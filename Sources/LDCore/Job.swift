@@ -67,10 +67,19 @@ public struct Job: Identifiable, @unchecked Sendable {
         return definition.disabledKey ?? false
     }
 
+    /// KeepAlive keeps restarting it and it keeps failing. Between respawns the job
+    /// briefly has a PID, so this deliberately ignores whether it is running right now.
+    public var isRestartLooping: Bool {
+        guard let keep = definition.keepAlive, keep != .never,
+              let runs, runs > 100, let exit = lastExit, exit != 0 else { return false }
+        return true
+    }
+
     public var status: JobStatus {
         if definition.parseError != nil || definition.declaredLabel == nil { return .invalid }
         if isDisabled && !isLoaded { return .disabled }
         if isBlockedInBackground && pid == nil { return .blocked }
+        if isRestartLooping { return .failed }
         if pid != nil { return .running }
         if !isLoaded { return .notLoaded }
         if let e = lastExit, e != 0 { return .failed }
@@ -132,7 +141,7 @@ public struct Job: Identifiable, @unchecked Sendable {
         if e == 0 { return "OK" }
         let what = ExitCode.short(e)
         if status == .running { return "Previous: \(what)" }
-        if let r = runs, r > 50, definition.keepAlive != nil, definition.keepAlive != .never {
+        if isRestartLooping, let r = runs {
             return "\(what) · \(r.formatted()) restarts"
         }
         return what

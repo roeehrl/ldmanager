@@ -401,7 +401,7 @@ struct New: ParsableCommand {
                 job = Inventory.reload(job)
             }
             if common.json { return emitJSON(JobJSON(job)) }
-            print(Style.green("created ") + LDCore.Doctor.abbreviate(url.path) + Style.dim("  (\(def.schedule.summary.lowercased())\(noLoad ? "" : " · loaded"))"))
+            print(Style.green("created ") + LDCore.Doctor.abbreviate(url.path) + Style.dim("  (\(def.schedule.summaryInSentence)\(noLoad ? "" : " · loaded"))"))
         }
     }
 
