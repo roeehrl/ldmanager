@@ -286,6 +286,8 @@ struct HelperFooter: View {
                 Button("Install Helper…") { model.setUpHelper(then: nil) }.controlSize(.small)
             case .needsApproval:
                 Button("Show Me How…") { model.setUpHelper(then: nil) }.controlSize(.small)
+            case .broken:
+                Button("Repair Helper") { Task { await model.repairHelper() } }.controlSize(.small)
             default:
                 EmptyView()
             }
@@ -297,6 +299,7 @@ struct HelperFooter: View {
         switch model.helperState {
         case .enabled: "Helper approved · no password prompts"
         case .needsApproval: "Helper waiting for your approval"
+        case .broken: "Helper not responding"
         case .notInstalled, .notBundled: "System changes ask for your password"
         case .unsigned: "Unsigned build · system changes ask for your password"
         }
@@ -308,6 +311,7 @@ struct HelperFooter: View {
         case .needsApproval: "Turn on LD Manager under System Settings → General → Login Items → \(LoginItemsWording.section)."
         case .notInstalled: "Install the helper once to stop password prompts for system daemons and Login Items checks."
         case .notBundled: "This build doesn’t include the helper. Build with scripts/build-app.sh."
+        case .broken: "macOS lists the helper as approved, but it doesn’t answer, usually because LD Manager moved since it was installed. Repair registers it again from this copy."
         case .unsigned: "The helper needs the app signed with a Developer ID or Apple Development certificate."
         }
     }

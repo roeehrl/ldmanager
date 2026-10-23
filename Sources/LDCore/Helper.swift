@@ -248,14 +248,18 @@ public enum Privileged {
         try admin([["/bin/mkdir", "-p", "/usr/local/bin"], ["/bin/ln", "-sfn", bundledPath, HelperPolicy.cliLinkPath]])
     }
 
-    /// `sfltool dumpbtm`: silent through the helper, otherwise macOS prompts.
-    public static func dumpBackgroundItems() -> ShellResult {
+    /// `sfltool dumpbtm`: silent through the helper, otherwise macOS prompts, unless
+    /// `allowPrompt` is false, in which case it fails instead of prompting.
+    public static func dumpBackgroundItems(allowPrompt: Bool = true) -> ShellResult {
         if usesHelper {
             return HelperClient.shared.call(fallback: ShellResult(status: -1, stdout: "", stderr: "The helper didn’t answer.")) { proxy, done in
                 proxy.dumpBackgroundItems { out, err in
                     done(out.map { ShellResult(status: 0, stdout: $0, stderr: "") } ?? ShellResult(status: 1, stdout: "", stderr: err ?? "Failed."))
                 }
             }
+        }
+        guard allowPrompt else {
+            return ShellResult(status: 1, stdout: "", stderr: "The helper isn’t reachable, and this read may not prompt.")
         }
         return Shell.run("/usr/bin/sfltool", ["dumpbtm"])
     }

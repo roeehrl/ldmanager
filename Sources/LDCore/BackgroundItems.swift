@@ -90,8 +90,10 @@ public enum BackgroundItems {
 
     /// Runs `sfltool dumpbtm` and caches the result: silently through the helper,
     /// otherwise macOS shows its administrator prompt. nil if cancelled or unavailable.
-    public static func refresh() -> Snapshot? {
-        let r = Privileged.dumpBackgroundItems()
+    /// With `allowPrompt` false it never shows the administrator prompt: it reads
+    /// through the helper or not at all (for background refreshes nobody asked for).
+    public static func refresh(allowPrompt: Bool = true) -> Snapshot? {
+        let r = Privileged.dumpBackgroundItems(allowPrompt: allowPrompt)
         guard r.succeeded else { return nil }
         let items = parse(r.stdout)
         guard !items.isEmpty else { return nil }
