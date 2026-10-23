@@ -5,7 +5,7 @@
 <h1 align="center">LD Manager</h1>
 
 <p align="center">
-  <b>See why your launchd jobs aren’t running — and fix them.</b><br>
+  <b>Know what runs on your Mac, and why it doesn’t.</b><br>
   A free, open-source, native macOS app and CLI for LaunchAgents and LaunchDaemons.
 </p>
 
