@@ -44,7 +44,7 @@ struct MenuBarView: View {
                             StatusGlyph(status: job.status, size: 11)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(job.title)
-                                Text(job.pid.map { "Running · PID \($0)" } ?? job.resultSummary + " · " + job.definition.schedule.summary.lowercased())
+                                Text(job.pid.map { "Running · PID \($0)" } ?? job.resultSummary + " · " + job.definition.schedule.summaryInSentence)
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                             Spacer()

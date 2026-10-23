@@ -316,3 +316,65 @@ import Testing
         #expect(SecRequirementCreateWithString(r as CFString, [], &req) == errSecSuccess)
     }
 }
+
+@Suite struct ReleaseFixes {
+    func job(_ raw: [String: Any], listing: ServiceListing?, detail: ServiceDetail?) -> Job {
+        var r = raw
+        r["Label"] = "com.example.loop"
+        r["ProgramArguments"] = ["/bin/sh", "-c", "exit 1"]
+        return Job(definition: JobDefinition(url: URL(fileURLWithPath: "/tmp/com.example.loop.plist"), scope: .user, raw: r),
+                   listing: listing, detail: detail, override: nil)
+    }
+
+    @Test func scheduleKeepsProperNounsCapitalised() {
+        let monday = JobDefinition(url: URL(fileURLWithPath: "/tmp/x.plist"), scope: .user,
+                                   raw: ["StartCalendarInterval": ["Weekday": 1, "Hour": 9, "Minute": 30]])
+        #expect(monday.schedule.summaryInSentence == "Mondays at 09:30")
+        let every = JobDefinition(url: URL(fileURLWithPath: "/tmp/x.plist"), scope: .user, raw: ["StartInterval": 1800])
+        #expect(every.schedule.summaryInSentence == "every 30 minutes")
+    }
+
+    @Test func restartLoopStaysFailedWhileRespawning() {
+        let listing = ServiceListing(label: "com.example.loop", pid: 4242, lastExit: 1)
+        var detail = ServiceDetail()
+        detail.pid = 4242
+        detail.runs = 500
+        detail.lastExitCode = 1
+        detail.state = "running"
+        let j = job(["KeepAlive": ["SuccessfulExit": false]], listing: listing, detail: detail)
+        #expect(j.isRestartLooping)
+        #expect(j.status == .failed)
+        #expect(j.resultSummary == "Exit 1 · 500 restarts")
+        #expect(Doctor.diagnose(j).findings.contains { $0.id == "loop" })
+        #expect(Doctor.problems(in: [j]).count == 1)
+    }
+
+    @Test func spawnScheduledWithFailureIsFailed() {
+        var detail = ServiceDetail()
+        detail.state = "spawn scheduled"
+        detail.runs = 300
+        detail.lastExitCode = 1
+        let j = job(["KeepAlive": true], listing: ServiceListing(label: "com.example.loop", pid: nil, lastExit: 1), detail: detail)
+        #expect(j.status == .failed)
+        #expect(Doctor.diagnose(j).findings.contains { $0.id == "loop" })
+    }
+
+    @Test func healthyKeepAliveIsNotALoop() {
+        var detail = ServiceDetail()
+        detail.pid = 10
+        detail.runs = 1
+        detail.lastExitCode = 0
+        let j = job(["KeepAlive": true], listing: ServiceListing(label: "com.example.loop", pid: 10, lastExit: 0), detail: detail)
+        #expect(!j.isRestartLooping)
+        #expect(j.status == .running)
+    }
+
+    @Test func missingProgramDoesNotOfferTerminal() {
+        let j = Job(definition: JobDefinition(url: URL(fileURLWithPath: "/tmp/com.example.gone.plist"), scope: .user,
+                                              raw: ["Label": "com.example.gone", "ProgramArguments": ["/nonexistent/dir/tool"], "StartInterval": 60]),
+                    listing: nil, detail: nil, override: nil)
+        let fixes = Doctor.diagnose(j).findings.first { $0.id == "program" }?.fixes ?? []
+        #expect(fixes.contains(.chooseProgram))
+        #expect(!fixes.contains { if case .openTerminal = $0 { true } else { false } })
+    }
+}

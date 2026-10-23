@@ -140,8 +140,7 @@ public enum Doctor {
                 find("program", .error, "Its program isn’t executable", "\(abbreviate(path)) exists but doesn’t have execute permission.", [.chooseProgram, .revealPlist])
             } else {
                 check("program", "Program exists and is executable", false, "\(abbreviate(program)) — not found")
-                let dir = existingAncestor(of: program)
-                find("program", .error, missingProgramHeadline(program), "The program the job points at, \(abbreviate(program)), doesn’t exist, so every start fails immediately.", [.chooseProgram] + (dir.map { [.openTerminal(directory: $0)] } ?? []) + [.disable])
+                find("program", .error, missingProgramHeadline(program), "The program the job points at, \(abbreviate(program)), doesn’t exist, so every start fails immediately.", [.chooseProgram, .disable, .revealPlist])
             }
         } else {
             check("program", "Program exists and is executable", false, "No Program or ProgramArguments")
@@ -220,7 +219,7 @@ public enum Doctor {
                 find("loaded", .warning, "It isn’t loaded", "The job is enabled but not loaded in launchd, so its triggers do nothing until it’s loaded or you log in again.", [.load])
             }
             if let code = job.lastExit, code != 0 {
-                let looping = (job.runs ?? 0) > 100 && def.keepAlive != nil && def.keepAlive != .never && job.pid == nil
+                let looping = job.isRestartLooping
                 let quiet = [def.standardOutPath, def.standardErrorPath].allSatisfy { $0 == nil || $0 == "/dev/null" }
                 if looping {
                     check("loop", "Not stuck in a restart loop", false, "\(job.runs!.formatted()) runs")
@@ -287,15 +286,6 @@ public enum Doctor {
 
     static func hasQuarantine(_ path: String) -> Bool {
         getxattr(path, "com.apple.quarantine", nil, 0, 0, 0) >= 0
-    }
-
-    static func existingAncestor(of path: String) -> String? {
-        var p = (path as NSString).deletingLastPathComponent
-        while p.count > 1 {
-            if FileManager.default.fileExists(atPath: p) { return p }
-            p = (p as NSString).deletingLastPathComponent
-        }
-        return nil
     }
 
     static func missingProgramHeadline(_ program: String) -> String {
