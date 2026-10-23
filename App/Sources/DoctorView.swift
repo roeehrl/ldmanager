@@ -208,6 +208,7 @@ struct StatCard: View {
 struct RecentChangesView: View {
     @Environment(AppModel.self) private var model
     @State private var selection: PlistEditor.Backup.ID?
+    @State private var confirmRestore: PlistEditor.Backup?
 
     var body: some View {
         if model.backups.isEmpty {
@@ -226,12 +227,19 @@ struct RecentChangesView: View {
                 TableColumn("") { b in
                     HStack {
                         Button("Show") { NSWorkspace.shared.activateFileViewerSelecting([b.url]) }
-                        Button("Restore") { model.restore(b) }.disabled(b.originalPath == nil)
+                        Button("Restore…") { confirmRestore = b }.disabled(b.originalPath == nil)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
                 .width(150)
+            }
+            .confirmationDialog(confirmRestore.map { "Restore \(Job.title(for: $0.label)) to this version?" } ?? "",
+                                isPresented: Binding(get: { confirmRestore != nil }, set: { if !$0 { confirmRestore = nil } }),
+                                titleVisibility: .visible, presenting: confirmRestore) { b in
+                Button("Restore") { model.restore(b) }
+            } message: { b in
+                Text("The job goes back to how it was before \(b.date.formatted(date: .abbreviated, time: .shortened)) and is reloaded if loaded. The current version is backed up first, so you can undo this.")
             }
         }
     }

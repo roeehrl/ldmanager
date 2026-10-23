@@ -4,13 +4,36 @@
 // same team, and does only what HelperPolicy allows.
 import Foundation
 import LDCore
+import Security
 
 final class Helper: NSObject, NSXPCListenerDelegate, LDHelperProtocol {
+    private let lock = NSLock()
+    private var openConnections = 0
+    private var lastActivity = Date()
+
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         connection.exportedInterface = NSXPCInterface(with: LDHelperProtocol.self)
         connection.exportedObject = self
+        touch(+1)
+        connection.invalidationHandler = { [weak self] in self?.touch(-1) }
         connection.resume()
         return true
+    }
+
+    private func touch(_ delta: Int) {
+        lock.lock(); openConnections += delta; lastActivity = Date(); lock.unlock()
+    }
+
+    /// launchd starts the helper on demand, so it exits when idle; the next
+    /// request relaunches it from the current app bundle, which also picks up updates.
+    func exitWhenIdle(after seconds: TimeInterval) {
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock()
+            let idle = self.openConnections <= 0 && Date().timeIntervalSince(self.lastActivity) > seconds
+            self.lock.unlock()
+            if idle { exit(0) }
+        }
     }
 
     func version(reply: @escaping (String) -> Void) {
@@ -92,6 +115,39 @@ final class Helper: NSObject, NSXPCListenerDelegate, LDHelperProtocol {
         r.succeeded ? reply(r.stdout, nil) : reply(nil, r.message)
     }
 
+    func linkCommandLineTool(_ bundledPath: String, reply: @escaping (String?) -> Void) {
+        if let error = HelperPolicy.validateBundledCLI(bundledPath) { return reply(error) }
+        if let error = checkRegularFile(bundledPath) { return reply(error) }
+        // Only link a binary signed as our ldm by our own team.
+        guard let team = HelperPolicy.currentTeamIdentifier() else { return reply("The helper isn’t signed.") }
+        var code: SecStaticCode?
+        var requirement: SecRequirement?
+        guard SecStaticCodeCreateWithPath(URL(fileURLWithPath: bundledPath) as CFURL, [], &code) == errSecSuccess, let code,
+              SecRequirementCreateWithString(HelperPolicy.cliRequirement(team: team) as CFString, [], &requirement) == errSecSuccess,
+              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSCheckAllArchitectures), requirement) == errSecSuccess else {
+            return reply("That ldm isn’t signed by LD Manager’s developer.")
+        }
+        let link = HelperPolicy.cliLinkPath
+        let dir = (link as NSString).deletingLastPathComponent
+        do {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        } catch {
+            return reply(error.localizedDescription)
+        }
+        var st = stat()
+        if lstat(link, &st) == 0 && (st.st_mode & S_IFMT) != S_IFLNK {
+            return reply("\(link) already exists and isn’t a link LD Manager made. Remove it first.")
+        }
+        let tmp = "\(dir)/.ldm-link-\(UUID().uuidString)"
+        guard symlink(bundledPath, tmp) == 0 else { return reply(String(cString: strerror(errno))) }
+        guard rename(tmp, link) == 0 else {
+            let message = String(cString: strerror(errno))
+            unlink(tmp)
+            return reply(message)
+        }
+        reply(nil)
+    }
+
     // MARK: Helpers
 
     private func isSymlink(_ path: String) -> Bool {
@@ -126,4 +182,5 @@ let listener = NSXPCListener(machServiceName: HelperPolicy.machService)
 listener.setConnectionCodeSigningRequirement(HelperPolicy.clientRequirement(team: team))
 listener.delegate = helper
 listener.resume()
+helper.exitWhenIdle(after: 30)
 RunLoop.main.run()

@@ -5,6 +5,8 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("refreshInterval") private var refreshInterval = 5.0
     @State private var cliStatus = CLIInstaller.status
+    @State private var confirmRemoveHelper = false
+    @State private var cliError: String?
 
     var body: some View {
         Form {
@@ -19,7 +21,12 @@ struct SettingsView: View {
             Section("Privileged helper") {
                 HelperFooter()
                 if model.helperState == .enabled {
-                    Button("Remove Helper", role: .destructive) { model.uninstallHelper() }
+                    Button("Remove Helper…", role: .destructive) { confirmRemoveHelper = true }
+                        .confirmationDialog("Remove the privileged helper?", isPresented: $confirmRemoveHelper) {
+                            Button("Remove Helper", role: .destructive) { model.uninstallHelper() }
+                        } message: {
+                            Text("System changes will ask for your password again. You can install it again later, which needs approval in System Settings.")
+                        }
                 }
                 if model.helperDeclined && model.helperState != .enabled {
                     Toggle("Offer the helper when an action needs a password", isOn: Binding(get: { !model.helperDeclined }, set: { model.helperDeclined = !$0 }))
@@ -33,15 +40,22 @@ struct SettingsView: View {
                 }
                 HStack {
                     Button(cliStatus.isInstalled ? "Reinstall" : "Install ldm in /usr/local/bin") {
-                        CLIInstaller.install()
-                        cliStatus = CLIInstaller.status
+                        model.withPrivilege(true, reason: "Installing ldm in /usr/local/bin needs administrator rights.") {
+                            Task {
+                                cliError = await Task.detached { CLIInstaller.install() }.value
+                                cliStatus = CLIInstaller.status
+                            }
+                        }
                     }
                     .disabled(CLIInstaller.bundledPath == nil)
                     if CLIInstaller.bundledPath == nil {
                         Text("Not bundled in this build — use `swift build -c release`.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Text("Creates a symlink to the copy inside the app, so it updates with the app. Asks for your password.")
+                if let cliError {
+                    Label(cliError, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                }
+                Text("Links to the copy inside the app, so it updates with the app." + (model.helperState == .enabled ? "" : " Asks for your password."))
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Backups") {
@@ -84,8 +98,14 @@ enum CLIInstaller {
         return .other(linkPath)
     }
 
-    static func install() {
-        guard let src = bundledPath else { return }
-        _ = Shell.runAsAdmin([["/bin/mkdir", "-p", "/usr/local/bin"], ["/bin/ln", "-sf", src, linkPath]])
+    /// nil on success, otherwise what went wrong.
+    static func install() -> String? {
+        guard let src = bundledPath else { return "This build doesn’t include ldm." }
+        do {
+            try Privileged.linkCommandLineTool(src)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 }

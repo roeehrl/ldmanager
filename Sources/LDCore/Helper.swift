@@ -17,6 +17,8 @@ import Security
     func removeQuarantine(at path: String, reply: @escaping (String?) -> Void)
     /// `sfltool dumpbtm` output. Replies (output, error).
     func dumpBackgroundItems(reply: @escaping (String?, String?) -> Void)
+    /// Points /usr/local/bin/ldm at the ldm bundled in an LD Manager app.
+    func linkCommandLineTool(_ bundledPath: String, reply: @escaping (String?) -> Void)
 }
 
 /// What the helper agrees to do. Kept here, outside the helper, so it is unit-tested.
@@ -50,6 +52,22 @@ public enum HelperPolicy {
         guard allowed.contains(dir) else { return "Only \(allowed.joined(separator: " and ")) are allowed." }
         guard name.hasSuffix(".plist"), !name.hasPrefix("."), name.count > 6 else { return "Not a job plist name." }
         return nil
+    }
+
+    public static let cliLinkPath = "/usr/local/bin/ldm"
+
+    /// nil if `path` looks like the ldm inside an app bundle. The helper also checks its signature.
+    public static func validateBundledCLI(_ path: String) -> String? {
+        let std = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard path.hasPrefix("/"), std == path, path.hasSuffix(".app/Contents/Helpers/ldm") else {
+            return "Only the ldm inside an LD Manager app can be linked."
+        }
+        return nil
+    }
+
+    /// Code requirement the bundled ldm must satisfy before it is linked.
+    public static func cliRequirement(team: String) -> String {
+        "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\" and identifier \"\(cliIdentifier)\""
     }
 
     public static func validateTarget(_ target: String) -> String? {
@@ -219,6 +237,15 @@ public enum Privileged {
             return
         }
         try admin([["/usr/bin/xattr", "-d", "com.apple.quarantine", path]])
+    }
+
+    /// Links /usr/local/bin/ldm to the bundled CLI: silently through the helper, otherwise with a prompt.
+    public static func linkCommandLineTool(_ bundledPath: String) throws {
+        if usesHelper {
+            try helperCall { proxy, done in proxy.linkCommandLineTool(bundledPath, reply: done) }
+            return
+        }
+        try admin([["/bin/mkdir", "-p", "/usr/local/bin"], ["/bin/ln", "-sfn", bundledPath, HelperPolicy.cliLinkPath]])
     }
 
     /// `sfltool dumpbtm`: silent through the helper, otherwise macOS prompts.

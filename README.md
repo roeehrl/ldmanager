@@ -1,5 +1,7 @@
 # LD Manager
 
+[![CI](https://github.com/roeehrl/ldmanager/actions/workflows/ci.yml/badge.svg)](https://github.com/roeehrl/ldmanager/actions/workflows/ci.yml)
+
 A native macOS app and command-line tool for seeing, diagnosing and managing
 **launchd** jobs: your LaunchAgents, agents for all users, and system LaunchDaemons.
 
@@ -121,7 +123,8 @@ small helper (`SMAppService` daemon, bundled in the app) that you approve once i
   `/Library/LaunchDaemons` and `/Library/LaunchAgents`, fixing their permissions,
   creating log folders, removing quarantine, and reading Login Items.
 - Remove it any time in **Settings › Privileged helper**. `ldm helper` reports
-  whether it is reachable.
+  whether it is reachable. It exits when idle and launchd relaunches it from the
+  current app, so updates take effect on their own (`ldm helper --restart` forces it).
 
 Changes go through `launchctl bootstrap`, `bootout`, `enable`, `disable`,
 `kickstart` and `kill`. Changes to system daemons, and writes to `/Library`, ask for

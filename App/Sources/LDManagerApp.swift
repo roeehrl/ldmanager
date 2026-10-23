@@ -60,6 +60,15 @@ struct JobCommands: Commands {
             Button("Reveal in Finder") { if let job { model.reveal(job) } }
                 .keyboardShortcut("r", modifiers: [.command, .option])
                 .disabled(job == nil)
+            Button(job.map { model.pinned.contains($0.label) } == true ? "Unpin from Menu Bar" : "Pin to Menu Bar") {
+                if let job { model.togglePin(job) }
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+            .disabled(job == nil)
+            Divider()
+            Button("Move to Trash…") { if let job { model.confirmTrash = job } }
+                .keyboardShortcut(.delete, modifiers: [.command])
+                .disabled(job == nil || job?.scope.isReadOnly == true)
             Divider()
             Button("Refresh") { Task { await model.refresh() } }
                 .keyboardShortcut("r", modifiers: [.command, .control])

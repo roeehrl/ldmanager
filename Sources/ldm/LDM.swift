@@ -504,10 +504,18 @@ struct HelperStatus: ParsableCommand {
         abstract: "Show whether LD Manager's privileged helper is reachable. Install and approve it from the app."
     )
 
+    @Flag(help: "Restart the helper so it runs the copy in the current app (after an update).") var restart = false
+
     func run() throws {
         if HelperPolicy.currentTeamIdentifier() == nil {
             print("ldm isn’t signed with a team, so the helper won’t accept it. Use the copy bundled in LD Manager.app.")
             throw ExitCode(Exit.authorization)
+        }
+        if restart, HelperClient.shared.isAvailable {
+            // The helper restarts itself; the connection drops as it exits, which is expected.
+            _ = Privileged.launchctl([["/bin/launchctl", "kickstart", "-k", "system/\(HelperPolicy.machService)"]])
+            HelperClient.shared.resetProbe()
+            Thread.sleep(forTimeInterval: 1)
         }
         if HelperClient.shared.isAvailable {
             print(Style.green("✓ ") + "helper reachable — system changes and Login Items checks won’t prompt")

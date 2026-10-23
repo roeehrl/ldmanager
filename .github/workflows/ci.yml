@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Core, CLI and helper
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sudo xcode-select -s "$(find /Applications -maxdepth 1 -name "Xcode_26*.app" | sort -V | tail -1)"
+          swift --version
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+      - name: Build
+        run: swift build --build-tests
+      - name: Test
+        run: swift test --skip-build
+      - name: ldm smoke test
+        run: |
+          swift build -c release --product ldm
+          BIN="$(swift build -c release --show-bin-path)/ldm"
+          "$BIN" --version
+          "$BIN" explain 78
+          "$BIN" list --no-color
+          "$BIN" new ci-smoke --every 1h --dry-run -- /bin/echo hi
+
+  app:
+    name: macOS app
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: sudo xcode-select -s "$(find /Applications -maxdepth 1 -name "Xcode_26*.app" | sort -V | tail -1)"
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: cd App && xcodegen generate
+      - name: Build app
+        run: |
+          xcodebuild -project App/LDManager.xcodeproj -scheme LDManager -configuration Release \
+            -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build | tail -20
+          test -d "build/DerivedData/Build/Products/Release/LD Manager.app"
+      - name: Lint helper plist
+        run: plutil -lint App/Helper/*.plist
