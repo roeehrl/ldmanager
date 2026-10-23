@@ -2,6 +2,7 @@ import LDCore
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(AppModel.self) private var model
     @AppStorage("refreshInterval") private var refreshInterval = 5.0
     @State private var cliStatus = CLIInstaller.status
 
@@ -14,6 +15,17 @@ struct SettingsView: View {
                     Text("15 seconds").tag(15.0)
                     Text("1 minute").tag(60.0)
                 }
+            }
+            Section("Privileged helper") {
+                HelperFooter()
+                if model.helperState == .enabled {
+                    Button("Remove Helper", role: .destructive) { model.uninstallHelper() }
+                }
+                if model.helperDeclined && model.helperState != .enabled {
+                    Toggle("Offer the helper when an action needs a password", isOn: Binding(get: { !model.helperDeclined }, set: { model.helperDeclined = !$0 }))
+                }
+                Text("The helper runs as root and only accepts LD Manager and its ldm tool. It manages system daemons, writes plists in /Library, and reads Login Items without asking for your password each time.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Command-line tool") {
                 LabeledContent("ldm") {

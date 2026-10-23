@@ -25,7 +25,7 @@ struct LDM: ParsableCommand {
         """,
         version: "0.1.0",
         subcommands: [List.self, Show.self, Doctor.self, Start.self, Stop.self, Restart.self, Load.self, Unload.self,
-                      Enable.self, Disable.self, Logs.self, New.self, Edit.self, Remove.self, Explain.self]
+                      Enable.self, Disable.self, Logs.self, New.self, Edit.self, Remove.self, Explain.self, HelperStatus.self]
     )
 }
 
@@ -33,7 +33,7 @@ struct Common: ParsableArguments {
     @Flag(help: "Output JSON (stable for scripts).") var json = false
     @Flag(name: .customLong("no-color"), help: "Disable colors.") var noColor = false
     @Flag(help: "Include Apple's jobs on the system volume.") var apple = false
-    @Flag(help: "Re-read Login Items › Allow in the Background. macOS asks for your password; otherwise the last result is used.")
+    @Flag(help: "Re-read Login Items › App Background Activity. macOS asks for your password; otherwise the last result is used.")
     var background = false
 
     func setup() { if noColor { Style.enabled = false } }
@@ -496,4 +496,24 @@ struct Explain: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Explain a launchd exit code or signal (negative = signal).")
     @Argument(help: "Exit code, e.g. 78 or -15.") var code: Int
     func run() throws { print(ExitCode.explain(code)) }
+}
+
+struct HelperStatus: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "helper",
+        abstract: "Show whether LD Manager's privileged helper is reachable. Install and approve it from the app."
+    )
+
+    func run() throws {
+        if HelperPolicy.currentTeamIdentifier() == nil {
+            print("ldm isn’t signed with a team, so the helper won’t accept it. Use the copy bundled in LD Manager.app.")
+            throw ExitCode(Exit.authorization)
+        }
+        if HelperClient.shared.isAvailable {
+            print(Style.green("✓ ") + "helper reachable — system changes and Login Items checks won’t prompt")
+        } else {
+            print("helper not reachable — install and approve it in LD Manager (sidebar or Settings)")
+            throw ExitCode(Exit.authorization)
+        }
+    }
 }

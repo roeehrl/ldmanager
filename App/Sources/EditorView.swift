@@ -538,6 +538,16 @@ struct EditorView: View {
                 .background(.background, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
             }
+            if (draft.scope.fileNeedsAdmin || (draft.scope.launchctlNeedsAdmin && draft.loadAfterSave)),
+               model.helperState != .enabled, model.helperState != .unsigned {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.shield").foregroundStyle(.secondary)
+                    Text("Saving asks for your password.").font(.caption).foregroundStyle(.secondary)
+                    Button("Install Helper to Skip This…") { model.setUpHelper(then: nil) }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+            }
             if let err = saveError ?? draft.validationError {
                 Label(err, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
             }

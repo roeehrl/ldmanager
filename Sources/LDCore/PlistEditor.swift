@@ -67,15 +67,7 @@ public enum PlistEditor {
         let backup = try backupIfPresent(url, label: label)
 
         if scope.fileNeedsAdmin {
-            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("ldm-\(UUID().uuidString).plist")
-            try data.write(to: tmp)
-            defer { try? FileManager.default.removeItem(at: tmp) }
-            let r = Shell.runAsAdmin([
-                ["/bin/cp", tmp.path, url.path],
-                ["/usr/sbin/chown", "root:wheel", url.path],
-                ["/bin/chmod", "644", url.path],
-            ])
-            if !r.succeeded { throw r.status == 4 ? LDError.authorizationCancelled : LDError.io(r.message) }
+            try Privileged.installPlist(data, at: url.path)
         } else {
             try data.write(to: url, options: .atomic)
             try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
@@ -126,9 +118,7 @@ public enum PlistEditor {
         if job.isLoaded { try Launchctl.perform(.unload, on: job) }
         _ = try backupIfPresent(job.definition.url, label: job.label)
         if job.scope.fileNeedsAdmin {
-            let trash = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash/\(job.definition.url.lastPathComponent)")
-            let r = Shell.runAsAdmin([["/bin/mv", job.definition.url.path, trash.path]])
-            if !r.succeeded { throw LDError.io(r.message) }
+            try Privileged.trash(job.definition.url.path)
         } else {
             try FileManager.default.trashItem(at: job.definition.url, resultingItemURL: nil)
         }

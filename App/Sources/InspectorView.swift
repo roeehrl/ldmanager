@@ -123,7 +123,7 @@ struct InspectorView: View {
     @ViewBuilder var backgroundRow: some View {
         if let snap = model.background {
             let bg = job.background
-            layerRow("Allow in the Background", passed: bg.map(\.isOn), value: bg?.summary ?? "Not listed")
+            layerRow("App Background Activity", passed: bg.map(\.isOn), value: bg?.summary ?? "Not listed")
                 .help("Login Items & Extensions, as of \(snap.date.formatted(.relative(presentation: .named))). "
                       + (bg == nil ? "macOS hasn’t recorded this job yet; it usually appears after it first loads." : ""))
             if let bg, !bg.isOn {
@@ -134,12 +134,12 @@ struct InspectorView: View {
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 CheckMark(passed: nil).font(.callout)
-                Text("Allow in the Background")
+                Text("App Background Activity")
                 Spacer(minLength: 12)
                 Button(model.isCheckingBackground ? "Checking…" : "Check…") { model.checkLoginItems() }
                     .controlSize(.small)
                     .disabled(model.isCheckingBackground)
-                    .help("Reads Login Items & Extensions. macOS asks for your password.")
+                    .help(model.helperState == .enabled ? "Reads Login Items & Extensions." : "Reads Login Items & Extensions. macOS asks for your password.")
             }
             .font(.callout)
         }

@@ -23,7 +23,7 @@ struct DoctorView: View {
                 .frame(minWidth: 300, idealWidth: 380, maxWidth: 460)
                 .safeAreaInset(edge: .bottom) {
                     Text("The Doctor checks plists, programs, permissions, quarantine, log folders, restart loops and launchd state"
-                         + (model.background == nil ? ". Use Check Login Items to include Allow in the Background." : ", plus Allow in the Background."))
+                         + (model.background == nil ? ". Use Check Login Items to include App Background Activity." : ", plus App Background Activity."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(12)
@@ -44,7 +44,7 @@ struct DoctorView: View {
                     }
                     .disabled(model.isCheckingBackground)
                     .help(model.background.map { "Login Items last read \($0.date.formatted(.relative(presentation: .named))). Checking again asks for your password." }
-                          ?? "Also check Allow in the Background. macOS asks for your password.")
+                          ?? "Also check App Background Activity. macOS asks for your password.")
                 }
                 ToolbarItem {
                     Button { Task { await model.refresh() } } label: { Label("Check Again", systemImage: "arrow.clockwise") }

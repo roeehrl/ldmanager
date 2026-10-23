@@ -1,4 +1,5 @@
 import LDCore
+import ServiceManagement
 import SwiftUI
 
 struct ContentView: View {
@@ -16,6 +17,10 @@ struct ContentView: View {
         }
         .searchable(text: $model.search, placement: .toolbar, prompt: "Search label, program, status:failed, key:WatchPaths")
         .toolbar { toolbar }
+        .sheet(item: $model.privilegeRequest) { request in
+            HelperPromptSheet(request: request)
+                .environment(model)
+        }
         .sheet(item: $model.editorTarget) { target in
             EditorView(target: target)
                 .environment(model)
@@ -27,6 +32,9 @@ struct ContentView: View {
         } message: { job in
             Text("\(job.label) is unloaded and its plist moved to the Trash. A backup is kept in Recent Changes.")
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.updateHelperState()
+        }
         .alert("Couldn’t complete that", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -35,6 +43,15 @@ struct ContentView: View {
     }
 
     @ViewBuilder var detail: some View {
+        detailContent
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if model.helperBannerVisible && model.helperState != .enabled && model.helperState != .unsigned {
+                    HelperBanner()
+                }
+            }
+    }
+
+    @ViewBuilder var detailContent: some View {
         switch model.sidebar {
         case .problems: DoctorView()
         case .recent: RecentChangesView()
@@ -133,18 +150,7 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 6) {
-                Image(systemName: "lock.shield").foregroundStyle(.secondary)
-                Text("Changes to system jobs ask for your password")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-        }
+        .safeAreaInset(edge: .bottom) { HelperFooter().padding(.horizontal, 14).padding(.vertical, 10) }
     }
 
     func groupColor(_ name: String) -> Color {
@@ -258,6 +264,50 @@ struct JobMenu: View {
         if !job.scope.isReadOnly {
             Divider()
             Button("Move to Trash…", systemImage: "trash", role: .destructive) { model.confirmTrash = job }
+        }
+    }
+}
+
+/// Shows whether root operations go through the approved helper or prompt each time.
+struct HelperFooter: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: model.helperState == .enabled ? "checkmark.shield.fill" : "lock.shield")
+                    .foregroundStyle(model.helperState == .enabled ? .green : .secondary)
+                Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Spacer(minLength: 0)
+            }
+            switch model.helperState {
+            case .notInstalled, .notBundled:
+                Button("Install Helper…") { model.setUpHelper(then: nil) }.controlSize(.small)
+            case .needsApproval:
+                Button("Show Me How…") { model.setUpHelper(then: nil) }.controlSize(.small)
+            default:
+                EmptyView()
+            }
+        }
+        .help(help)
+    }
+
+    var text: String {
+        switch model.helperState {
+        case .enabled: "Helper approved · no password prompts"
+        case .needsApproval: "Helper waiting for your approval"
+        case .notInstalled, .notBundled: "System changes ask for your password"
+        case .unsigned: "Unsigned build · system changes ask for your password"
+        }
+    }
+
+    var help: String {
+        switch model.helperState {
+        case .enabled: "LD Manager’s helper handles system daemons and Login Items checks without asking for your password."
+        case .needsApproval: "Turn on LD Manager under System Settings → General → Login Items → \(LoginItemsWording.section)."
+        case .notInstalled: "Install the helper once to stop password prompts for system daemons and Login Items checks."
+        case .notBundled: "This build doesn’t include the helper. Build with scripts/build-app.sh."
+        case .unsigned: "The helper needs the app signed with a Developer ID or Apple Development certificate."
         }
     }
 }

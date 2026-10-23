@@ -1,7 +1,7 @@
 import Foundation
 
 /// One record from macOS Background Task Management (BTM), the database behind
-/// System Settings → General → Login Items & Extensions → Allow in the Background.
+/// System Settings → General → Login Items → App Background Activity.
 /// It is a second on/off layer, separate from launchd's own enable/disable override.
 public struct BackgroundItem: Equatable, Sendable {
     public var name: String?
@@ -88,10 +88,10 @@ public enum BackgroundItems {
         return items.isEmpty ? nil : Snapshot(items: items, date: date)
     }
 
-    /// Runs `sfltool dumpbtm`, which shows macOS's administrator prompt, and caches
-    /// the result. nil if the prompt was cancelled or the tool isn't available.
+    /// Runs `sfltool dumpbtm` and caches the result: silently through the helper,
+    /// otherwise macOS shows its administrator prompt. nil if cancelled or unavailable.
     public static func refresh() -> Snapshot? {
-        let r = Shell.run("/usr/bin/sfltool", ["dumpbtm"])
+        let r = Privileged.dumpBackgroundItems()
         guard r.succeeded else { return nil }
         let items = parse(r.stdout)
         guard !items.isEmpty else { return nil }

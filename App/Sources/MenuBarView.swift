@@ -48,7 +48,11 @@ struct MenuBarView: View {
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                             Spacer()
-                            Toggle(job.title, isOn: Binding(get: { !job.isDisabled && job.isLoaded }, set: { model.setActive($0, job) }))
+                            Toggle(job.title, isOn: Binding(get: { !job.isDisabled && job.isLoaded }, set: { on in
+                                // A system job may need to offer the helper first, which shows in the main window.
+                                if job.scope.launchctlNeedsAdmin && model.helperState != .enabled { open(nil) }
+                                model.setActive(on, job)
+                            }))
                                 .toggleStyle(.switch)
                                 .controlSize(.mini)
                                 .labelsHidden()

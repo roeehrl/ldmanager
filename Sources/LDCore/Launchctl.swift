@@ -143,7 +143,7 @@ public enum Launchctl {
         guard !cmds.isEmpty else { return cmds }
         let result: ShellResult
         if job.scope.launchctlNeedsAdmin {
-            result = Shell.runAsAdmin(cmds)
+            result = Privileged.launchctl(cmds)
         } else {
             var last = ShellResult(status: 0, stdout: "", stderr: "")
             for argv in cmds {

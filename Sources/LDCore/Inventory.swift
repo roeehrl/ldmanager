@@ -7,7 +7,7 @@ public enum Inventory {
         /// Run `launchctl print` per job for runs/last-exit detail. Skipped for
         /// Apple jobs unless asked, since there are hundreds of them.
         public var details: Bool
-        /// Join Background Task Management records ("Allow in the Background").
+        /// Join Background Task Management records ("App Background Activity").
         /// Off by default: reading them takes seconds, so callers cache a snapshot.
         public var background: BackgroundItems.Snapshot?
 

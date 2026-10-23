@@ -31,7 +31,7 @@ public enum JobStatus: String, Codable, Sendable, CaseIterable {
 
 /// A job as seen through every layer: the plist on disk, live launchd state,
 /// launchd's persistent enable/disable override, and the Background Task
-/// Management record behind "Allow in the Background".
+/// Management record behind "App Background Activity".
 public struct Job: Identifiable, @unchecked Sendable {
     public let definition: JobDefinition
     public let listing: ServiceListing?

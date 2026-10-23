@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "LDCore", targets: ["LDCore"]),
         .executable(name: "ldm", targets: ["ldm"]),
+        .executable(name: "LDManagerHelper", targets: ["LDManagerHelper"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
@@ -18,6 +19,7 @@ let package = Package(
             dependencies: ["LDCore", .product(name: "ArgumentParser", package: "swift-argument-parser")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .executableTarget(name: "LDManagerHelper", dependencies: ["LDCore"], swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(name: "LDCoreTests", dependencies: ["LDCore"], swiftSettings: [.swiftLanguageMode(.v5)]),
     ]
 )

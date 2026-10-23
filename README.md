@@ -8,7 +8,7 @@ running?* — in plain language, and never loses a key when it edits a plist.
 
 - **One view of every layer.** For each job: the plist on disk, whether launchd has
   it loaded, its persistent enable/disable override, its PID, launch count and last
-  exit code, and its **Allow in the Background** switch in Login Items — joined into
+  exit code, and its **App Background Activity** switch in Login Items — joined into
   a single status (running, waiting, failed, disabled, off in Login Items, not
   loaded, invalid).
 - **The Doctor.** Checks every job for invalid plists, missing Labels, missing or
@@ -24,6 +24,8 @@ running?* — in plain language, and never loses a key when it edits a plist.
   about survive. Every save shows a diff first and keeps a backup you can restore
   from *Recent Changes*.
 - **Menu bar extra** with a problem count and on/off switches for pinned jobs.
+- **Optional privileged helper.** Approve it once and system daemons, `/Library`
+  plists and Login Items checks stop asking for your password.
 - **`ldm`**, a CLI built on the same core, with `--json` output and documented exit codes.
 
 Requires macOS 26 or later.
@@ -39,12 +41,9 @@ scripts/build-app.sh
 This produces `build/LD Manager.app` with `ldm` bundled in `Contents/Helpers`. In the
 app, **Settings → Command-line tool** links it into `/usr/local/bin`.
 
-To sign for distribution, pass your Developer ID identity; the script signs with the
-hardened runtime so the app can be notarized:
-
-```bash
-SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" scripts/build-app.sh
-```
+The script signs with your first *Developer ID Application* or *Apple Development*
+certificate (hardened runtime, ready to notarize), or with `SIGN_IDENTITY` if set.
+`SIGN_IDENTITY=-` signs ad-hoc; everything works except the privileged helper.
 
 The CLI also builds on its own:
 
@@ -66,6 +65,7 @@ ldm new <name> (--every 15m | --cron "30 9 * * 1" | --keep-alive | --watch <path
 ldm edit <job> [--program <path>] [--every …] [--log <file>] [--dry-run]
 ldm remove <job> --confirm <label>
 ldm explain <code>
+ldm helper
 ```
 
 A job can be named by its full label, its last label component, its file name, or
@@ -73,7 +73,7 @@ any unique part of its label. `--dry-run` prints the exact `launchctl` commands
 instead of running them. Colors are off when output isn't a terminal or `NO_COLOR`
 is set.
 
-`--background` re-reads Login Items › Allow in the Background. macOS asks for your
+`--background` re-reads Login Items › App Background Activity. macOS asks for your
 password each time, so without the flag `ldm` uses the last result it read.
 
 | Exit code | Meaning |
@@ -94,13 +94,34 @@ administrator would: `launchctl print <domain>` for each domain's services,
 job's details, and the plist files themselves. Apple documents `launchctl print`'s
 output as not being an API, so every parser ignores lines it doesn't recognise.
 
-The **Allow in the Background** switches live in Background Task Management, a
+The **App Background Activity** switches (called *Allow in the Background* on earlier macOS versions) live in Background Task Management, a
 database only root can read. There is no public API for it, so LD Manager reads it
 with `sfltool dumpbtm`, which shows an administrator prompt every time it runs.
-That's why it is only read when you ask (**Check Login Items…** in the app,
-`--background` in the CLI) and the result is cached in
-`~/Library/Caches/LDManager`. These switches can't be changed programmatically;
+Without the helper it is only read when you ask (**Check Login Items…** in the
+app, `--background` in the CLI); with the helper it is read silently, and the app
+keeps it fresh. The result is cached in `~/Library/Caches/LDManager`. These switches can't be changed programmatically;
 the app opens the Login Items pane in System Settings instead.
+
+## The privileged helper
+
+Changing system daemons and files in `/Library` needs root. Without help, every
+such action shows macOS's administrator prompt. LD Manager can instead install a
+small helper (`SMAppService` daemon, bundled in the app) that you approve once in
+**System Settings › General › Login Items › App Background Activity**.
+
+- Nothing is asked at launch. The first time you do something that needs root, LD
+  Manager explains the helper and offers **Continue**, **Use Password Instead** or
+  **Cancel**. Choosing passwords is remembered; a banner, not a dialog, reminds you.
+- On **Continue**, System Settings opens with a small guide beside it. LD Manager
+  detects the approval on its own, confirms the helper answers, and finishes what
+  you were doing.
+- The helper only accepts LD Manager and its bundled `ldm`, verified by code
+  signature (same team, specific bundle identifiers). It does a fixed set of things,
+  each validated: `launchctl` on the `system` domain, writing or removing plists in
+  `/Library/LaunchDaemons` and `/Library/LaunchAgents`, fixing their permissions,
+  creating log folders, removing quarantine, and reading Login Items.
+- Remove it any time in **Settings › Privileged helper**. `ldm helper` reports
+  whether it is reachable.
 
 Changes go through `launchctl bootstrap`, `bootout`, `enable`, `disable`,
 `kickstart` and `kill`. Changes to system daemons, and writes to `/Library`, ask for
@@ -112,6 +133,7 @@ an administrator password through macOS.
 Sources/LDCore   job model, plist reading and lossless editing, launchctl adapter,
                  schedules, exit codes, the Doctor
 Sources/ldm      the CLI (Swift Argument Parser)
+Sources/LDManagerHelper  the privileged helper (XPC, runs as root)
 App/             the SwiftUI app (XcodeGen project.yml, Sources, Resources)
 Tests/           unit tests for the parsers, schedules, editing and the Doctor
 scripts/         app bundle build script and icon renderer
@@ -120,8 +142,6 @@ docs/            research notes behind the design
 
 ## Not yet done
 
-- A privileged helper (`SMAppService` daemon), approved once in System Settings, so
-  system-daemon changes and Login Items checks don't ask for a password each time.
 - Notifications when something adds or changes a launch job, and a timeline of
   upcoming runs.
 

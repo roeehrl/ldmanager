@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Testing
 @testable import LDCore
 
@@ -272,5 +273,46 @@ import Testing
         let d = Doctor.diagnose(job)
         #expect(d.findings.contains { $0.headline == "It’s switched off in Login Items" && $0.fixes == [.openLoginItems] })
         #expect(!d.findings.contains { $0.id == "loaded" })
+    }
+}
+
+@Suite struct HelperPolicyChecks {
+    @Test func launchctlAllowList() {
+        #expect(HelperPolicy.validateLaunchctl(["bootstrap", "system", "/Library/LaunchDaemons/com.example.d.plist"]) == nil)
+        #expect(HelperPolicy.validateLaunchctl(["bootout", "system/com.example.d"]) == nil)
+        #expect(HelperPolicy.validateLaunchctl(["kickstart", "-k", "system/com.example.d"]) == nil)
+        #expect(HelperPolicy.validateLaunchctl(["kill", "SIGTERM", "system/com.example.d"]) == nil)
+        // Other domains, verbs and paths are refused.
+        #expect(HelperPolicy.validateLaunchctl(["bootout", "gui/501/com.example.d"]) != nil)
+        #expect(HelperPolicy.validateLaunchctl(["bootstrap", "system", "/tmp/evil.plist"]) != nil)
+        #expect(HelperPolicy.validateLaunchctl(["bootstrap", "system", "/Library/LaunchAgents/x.plist"]) != nil)
+        #expect(HelperPolicy.validateLaunchctl(["setenv", "X", "1"]) != nil)
+        #expect(HelperPolicy.validateLaunchctl(["kill", "SIGSTOP; rm -rf /", "system/x"]) != nil)
+        #expect(HelperPolicy.validateLaunchctl(["enable", "system/a b"]) != nil)
+    }
+
+    @Test func jobPaths() {
+        #expect(HelperPolicy.validateJobPath("/Library/LaunchDaemons/com.example.d.plist") == nil)
+        #expect(HelperPolicy.validateJobPath("/Library/LaunchAgents/com.example.a.plist") == nil)
+        #expect(HelperPolicy.validateJobPath("/Library/LaunchDaemons/../../etc/sudoers.plist") != nil)
+        #expect(HelperPolicy.validateJobPath("/Library/LaunchDaemons/sub/x.plist") != nil)
+        #expect(HelperPolicy.validateJobPath("/System/Library/LaunchDaemons/x.plist") != nil)
+        #expect(HelperPolicy.validateJobPath("/Library/LaunchDaemons/.hidden.plist") != nil)
+        #expect(HelperPolicy.validateJobPath("Library/LaunchDaemons/x.plist") != nil)
+    }
+
+    @Test func directories() {
+        #expect(HelperPolicy.validateDirectory("/Library/Logs/Example") == nil)
+        #expect(HelperPolicy.validateDirectory("/usr/local/var/log/example") == nil)
+        #expect(HelperPolicy.validateDirectory("/etc/example") != nil)
+        #expect(HelperPolicy.validateDirectory("/Library/../etc") != nil)
+        #expect(HelperPolicy.validateDirectory("/System/Library/x") != nil)
+    }
+
+    @Test func requirementNamesBothClients() {
+        let r = HelperPolicy.clientRequirement(team: "ABCDE12345")
+        #expect(r.contains("\"ABCDE12345\"") && r.contains(HelperPolicy.appIdentifier) && r.contains(HelperPolicy.cliIdentifier))
+        var req: SecRequirement?
+        #expect(SecRequirementCreateWithString(r as CFString, [], &req) == errSecSuccess)
     }
 }

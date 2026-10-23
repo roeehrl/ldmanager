@@ -44,7 +44,7 @@ public enum Fix: Hashable, Codable, Sendable {
         case .removeQuarantine: "Clear the quarantine flag so launchd can run it."
         case .createDirectory(let p): "Create \((p as NSString).abbreviatingWithTildeInPath) so launchd can write the log."
         case .fixPermissions: "Set the owner and mode launchd requires."
-        case .openLoginItems: "Turn it back on under Allow in the Background. Only you can change this switch."
+        case .openLoginItems: "Turn it back on under App Background Activity. Only you can change this switch."
         }
     }
 }
@@ -205,13 +205,13 @@ public enum Doctor {
             check("enabled", "Enabled in launchd", true)
             if let bg = job.background {
                 if bg.isOn {
-                    check("background", "Allowed in the Background", true)
+                    check("background", "Allowed in App Background Activity", true)
                 } else {
-                    check("background", "Allowed in the Background", false, bg.summary)
+                    check("background", "Allowed in App Background Activity", false, bg.summary)
                     find("background", .error,
                          bg.isAllowed ? "It’s switched off in Login Items" : "A policy blocks it from running in the background",
                          bg.isAllowed
-                            ? "launchd has it enabled, but System Settings → General → Login Items & Extensions → Allow in the Background has it switched off, so macOS won’t let it run."
+                            ? "launchd has it enabled, but System Settings → General → Login Items → App Background Activity has it switched off, so macOS won’t let it run."
                             : "A management profile or system policy disallows it in Background Items, so macOS won’t let it run.",
                          bg.isAllowed ? [.openLoginItems] : [])
                 }
