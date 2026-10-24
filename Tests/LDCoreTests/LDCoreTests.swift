@@ -155,6 +155,10 @@ import Testing
     }
 
     @Test func exitCodes() {
+        #expect(ExitCode.explain(1) == "Exit 1: a general failure reported by the program. Its log usually says why.")
+        #expect(ExitCode.explain(2) == "Exit 2: usually wrong command-line usage.")
+        #expect(ExitCode.explain(13) == "Exit 13: often permission denied when a program passes errno through as its exit status; programs can use it for other meanings.")
+        #expect(ExitCode.explain(255) == "Exit 255: often used by SSH for its own errors; an `exit -1` can also be reported as 255. Programs may use it for other meanings.")
         #expect(ExitCode.short(78) == "Exit 78 · config error")
         #expect(ExitCode.short(-15) == "SIGTERM")
         #expect(ExitCode.explain(-9).contains("SIGKILL"))
