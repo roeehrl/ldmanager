@@ -393,3 +393,15 @@ import Testing
         #expect(BackgroundItems.refresh(allowPrompt: false) == nil)
     }
 }
+
+@Suite struct RunOutcomes {
+    let now = Date()
+
+    @Test func summaries() {
+        #expect(RunOutcome(result: .finished(exit: 0), started: now, logChanged: false).summary == "Ran and finished, exit 0 · log unchanged")
+        #expect(RunOutcome(result: .finished(exit: 78), started: now, logChanged: true).summary == "Ran and failed: Exit 78 · config error · wrote to its log")
+        #expect(RunOutcome(result: .running(pid: 42), started: now, logChanged: nil).summary == "Running now as PID 42")
+        #expect(!RunOutcome(result: .didNotStart, started: now, logChanged: nil).succeeded)
+        #expect(RunOutcome(result: .finished(exit: nil), started: now, logChanged: nil).succeeded)
+    }
+}

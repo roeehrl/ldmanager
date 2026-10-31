@@ -23,7 +23,7 @@ struct LDM: ParsableCommand {
         4 authorization needed or cancelled · 5 launchd rejected the operation ·
         6 doctor found problems.
         """,
-        version: "0.1.1",
+        version: "0.1.2",
         subcommands: [List.self, Show.self, Doctor.self, Start.self, Stop.self, Restart.self, Load.self, Unload.self,
                       Enable.self, Disable.self, Logs.self, New.self, Edit.self, Remove.self, Explain.self, HelperStatus.self]
     )
@@ -235,7 +235,18 @@ extension ActionCommand {
                 cmds.forEach { print("  " + Shell.commandLine($0)) }
                 return
             }
+            let logBefore = RunObserver.logStamp(job)
+            let started = Date()
             try Launchctl.perform(Self.action, on: job)
+            if Self.action == .start || Self.action == .restart {
+                // Many jobs run for a moment and exit; report what actually happened.
+                let outcome = RunObserver.observe(job, started: started, logBefore: logBefore)
+                if common.json { return emitJSON(JobJSON(Inventory.reload(job))) }
+                let mark = outcome.succeeded ? Style.green("✓ ") : Style.orange("▲ ")
+                print(mark + "\(Self.action.rawValue) \(job.label)  " + Style.dim(outcome.summary))
+                if !outcome.succeeded { throw ExitCode(Exit.launchd) }
+                return
+            }
             let after = Inventory.reload(job)
             if common.json { return emitJSON(JobJSON(after)) }
             print(Style.green("✓ ") + "\(Self.action.rawValue) \(job.label)  " + Style.dim(after.status.title))
