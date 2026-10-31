@@ -235,7 +235,18 @@ extension ActionCommand {
                 cmds.forEach { print("  " + Shell.commandLine($0)) }
                 return
             }
+            let logBefore = RunObserver.logStamp(job)
+            let started = Date()
             try Launchctl.perform(Self.action, on: job)
+            if Self.action == .start || Self.action == .restart {
+                // Many jobs run for a moment and exit; report what actually happened.
+                let outcome = RunObserver.observe(job, started: started, logBefore: logBefore)
+                if common.json { return emitJSON(JobJSON(Inventory.reload(job))) }
+                let mark = outcome.succeeded ? Style.green("✓ ") : Style.orange("▲ ")
+                print(mark + "\(Self.action.rawValue) \(job.label)  " + Style.dim(outcome.summary))
+                if !outcome.succeeded { throw ExitCode(Exit.launchd) }
+                return
+            }
             let after = Inventory.reload(job)
             if common.json { return emitJSON(JobJSON(after)) }
             print(Style.green("✓ ") + "\(Self.action.rawValue) \(job.label)  " + Style.dim(after.status.title))

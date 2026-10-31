@@ -31,6 +31,9 @@ final class AppModel {
     /// so it only happens when the user clicks Check Login Items.
     var background: BackgroundItems.Snapshot? = BackgroundItems.cached()
     var isCheckingBackground = false
+    /// The outcome of the last Run/Restart per job, shown in the inspector.
+    var runFeedback: [Job.ID: RunOutcome] = [:]
+    var runsInProgress: Set<Job.ID> = []
     var selectedJobID: Job.ID?
     var selectedProblemID: Diagnosis.ID?
     var search = ""
@@ -403,12 +406,25 @@ final class AppModel {
     }
 
     private func performNow(_ action: Launchctl.Action, on job: Job) {
+        let observes = action == .start || action == .restart
+        if observes {
+            runFeedback[job.id] = nil
+            runsInProgress.insert(job.id)
+        }
         Task {
             do {
+                let logBefore = RunObserver.logStamp(job)
+                let started = Date()
                 _ = try await Task.detached { try Launchctl.perform(action, on: job) }.value
+                if observes {
+                    // Many jobs run for a moment and exit, so say what actually happened.
+                    let outcome = await Task.detached { RunObserver.observe(job, started: started, logBefore: logBefore) }.value
+                    runFeedback[job.id] = outcome
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
+            runsInProgress.remove(job.id)
             await refresh()
         }
     }

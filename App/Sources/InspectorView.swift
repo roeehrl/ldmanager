@@ -6,6 +6,7 @@ struct InspectorView: View {
     let job: Job
     @State private var logLines: [String]?
     @State private var follow = true
+    @State private var logModified: Date?
 
     var body: some View {
         ScrollView {
@@ -59,11 +60,15 @@ struct InspectorView: View {
             }
             HStack(spacing: 8) {
                 primaryButton
-                Button("Run Once") { model.perform(.start, on: job) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity)
+                if job.pid != nil {
+                    Button("Stop") { model.perform(.stop, on: job) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity)
+                        .help(job.definition.keepAlive.map { $0 != .never } == true ? "launchd restarts KeepAlive jobs; turn the switch off to keep it stopped." : "Send SIGTERM")
+                }
             }
+            runStatus
         }
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 12))
@@ -85,10 +90,33 @@ struct InspectorView: View {
                 .controlSize(.large)
                 .frame(maxWidth: .infinity)
         } else {
-            Button("Start Now") { model.perform(.start, on: job) }
+            Button("Run Now") { model.perform(.start, on: job) }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .frame(maxWidth: .infinity)
+                .disabled(model.runsInProgress.contains(job.id))
+        }
+    }
+
+    /// What happened after Run Now / Restart, so a job that runs briefly and exits
+    /// doesn't look like it did nothing.
+    @ViewBuilder var runStatus: some View {
+        if model.runsInProgress.contains(job.id) {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(job.pid.map { "Running as PID \($0)… waiting for it to finish" } ?? "Starting…")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } else if let outcome = model.runFeedback[job.id] {
+            Label {
+                Text("\(outcome.started.formatted(date: .omitted, time: .standard)): \(outcome.summary)")
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: outcome.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(outcome.succeeded ? .green : .orange)
+            }
+            .help(outcome.result == .didNotStart ? "launchd recorded no new launch. It may be throttling restarts (at most every 10 s), or the job is disabled." : "")
         }
     }
 
@@ -98,8 +126,16 @@ struct InspectorView: View {
         case .notLoaded: "Enabled but not loaded — its triggers do nothing yet."
         case .running: "On — running now as PID \(job.pid ?? 0)."
         case .invalid: "launchd can’t load this plist."
-        default: "On — launchd starts it: \(job.definition.schedule.summaryInSentence)."
+        default:
+            "On — launchd starts it: \(job.definition.schedule.summaryInSentence)."
+                + (isShortLived ? " Each run is brief, so it’s normally not running in between." : "")
         }
+    }
+
+    /// Scheduled or one-shot jobs that aren't meant to stay up.
+    var isShortLived: Bool {
+        (job.definition.keepAlive == nil || job.definition.keepAlive == .never) && job.pid == nil
+            && (job.definition.startInterval != nil || !job.definition.calendarIntervals.isEmpty || !job.definition.watchPaths.isEmpty)
     }
 
     var layers: some View {
@@ -189,6 +225,12 @@ struct InspectorView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 SectionLabel(paths.first.map { "Log · \(($0 as NSString).lastPathComponent)" } ?? "Log")
+                if let modified = logModified {
+                    Text("· last written \(modified.formatted(.relative(presentation: .named)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help(modified.formatted(date: .abbreviated, time: .standard))
+                }
                 Spacer()
                 if !paths.isEmpty {
                     Toggle("Follow", isOn: $follow).toggleStyle(.checkbox).controlSize(.small)
@@ -238,6 +280,7 @@ struct InspectorView: View {
         guard let path = paths.first else { logLines = nil; return }
         while !Task.isCancelled {
             logLines = await Task.detached { LogReader.tail(path, lines: 14) }.value
+            logModified = RunObserver.logStamp(job)
             if !follow { break }
             try? await Task.sleep(for: .seconds(2))
         }
