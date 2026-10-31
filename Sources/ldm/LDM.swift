@@ -23,7 +23,7 @@ struct LDM: ParsableCommand {
         4 authorization needed or cancelled · 5 launchd rejected the operation ·
         6 doctor found problems.
         """,
-        version: "0.1.1",
+        version: "0.1.2",
         subcommands: [List.self, Show.self, Doctor.self, Start.self, Stop.self, Restart.self, Load.self, Unload.self,
                       Enable.self, Disable.self, Logs.self, New.self, Edit.self, Remove.self, Explain.self, HelperStatus.self]
     )
