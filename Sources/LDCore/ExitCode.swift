@@ -61,7 +61,7 @@ public enum ExitCode {
         case 13: return "Exit 13: often permission denied when a program passes errno through as its exit status; programs can use it for other meanings."
         case 126: return "Exit 126: the program exists but couldn’t be executed (permissions or not a binary)."
         case 127: return "Exit 127: the shell couldn’t find the command."
-        case 255: return "Exit 255: often used by SSH for its own errors; an `exit -1` can also be reported as 255. Programs may use it for other meanings."
+        case 255: return "Exit 255: often used by SSH for its own errors; an exit -1 can also be reported as 255. Programs may use it for other meanings."
         default:
             if code > 128, code < 160 {
                 let n = code - 128
