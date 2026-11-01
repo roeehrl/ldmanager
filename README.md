@@ -9,6 +9,8 @@
   A free, open-source, native macOS app and CLI for LaunchAgents and LaunchDaemons.
 </p>
 
+<p align="center"><a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja.md">日本語</a></p>
+
 <p align="center">
   <a href="https://github.com/roeehrl/ldmanager/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/roeehrl/ldmanager/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-blue"></a>
