@@ -447,7 +447,7 @@ extension AppModel {
         if outcome.kind == .forceQuit && outcome.report.result == "forceQuit" { forceQuitAt[id] = Date() }
 
         // Inline in the inspector when it shows this job; otherwise an alert says what failed.
-        let shownInInspector = selectedJobID == id && showInspector && sidebar != .problems && sidebar != .recent
+        let shownInInspector = showInspector && (sidebar == .problems ? selectedProblemID == id : selectedJobID == id && sidebar != .recent)
         if outcome.report.tone == .failure && !shownInInspector {
             errorMessage = "Couldn’t \(outcome.kind.verb) “\(job.title)”. " + (outcome.failure.map { "\($0.explanation)\n\n\($0.details)" } ?? outcome.report.summary)
         }

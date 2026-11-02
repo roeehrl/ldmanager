@@ -92,7 +92,7 @@ struct ContentView: View {
             Button { model.editorTarget = .new } label: { Label("New Job", systemImage: "plus") }
                 .help("New job (⌘N)")
         }
-        if tableMode {
+        if tableMode || model.sidebar == .problems {
             ToolbarSpacer(.fixed)
             ToolbarItem {
                 Button { model.showInspector.toggle() } label: { Label("Inspector", systemImage: "sidebar.trailing") }
