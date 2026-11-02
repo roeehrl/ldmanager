@@ -3,8 +3,8 @@ import SwiftUI
 
 struct DoctorView: View {
     @Environment(AppModel.self) private var model
-
     @State private var showDismissed = false
+    @State private var sortOrder = [KeyPathComparator(\ProblemRow.severityRank, order: .reverse)]
 
     var body: some View {
         @Bindable var model = model
@@ -17,49 +17,87 @@ struct DoctorView: View {
                 Button("Check Again") { Task { await model.refresh() } }
             }
         } else {
-            HSplitView {
-                List(selection: $model.selectedProblemID) {
-                    if model.diagnoses.isEmpty {
-                        Label("Nothing needs attention", systemImage: "checkmark.seal")
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 6)
+            let rows = (model.diagnoses.map { ProblemRow($0, dismissed: false, result: model.resultText(for: $0.job)) }
+                + (showDismissed ? model.dismissedDiagnoses.map { ProblemRow($0, dismissed: true, result: model.resultText(for: $0.job)) } : []))
+                .sorted(using: sortOrder)
+            Table(rows, selection: $model.selectedProblemID, sortOrder: $sortOrder) {
+                TableColumn("", value: \.severityRank) { row in
+                    ProblemGlyph(row: row)
+                }
+                .width(26)
+                TableColumn("Job", value: \.title) { row in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(row.title).fontWeight(.medium).lineLimit(1)
+                        Text(row.job.label).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     }
-                    ForEach(model.diagnoses) { d in
-                        ProblemRow(diagnosis: d).tag(d.id)
-                            .contextMenu { Button("Dismiss", systemImage: "archivebox") { model.dismiss(d) } }
+                    .padding(.vertical, 3)
+                    .opacity(row.dismissed ? 0.6 : 1)
+                }
+                .width(min: 140, ideal: 220)
+                TableColumn("Problem", value: \.headline) { row in
+                    Text(row.headline)
+                        .lineLimit(1)
+                        .foregroundStyle(row.dismissed ? .secondary : .primary)
+                        .help(row.diagnosis.primary?.detail ?? row.headline)
+                }
+                .width(min: 160, ideal: 300)
+                TableColumn("When it runs", value: \.schedule) { row in
+                    Text(row.schedule).lineLimit(1).opacity(row.dismissed ? 0.6 : 1)
+                }
+                .width(min: 90, ideal: 140)
+                TableColumn("Result", value: \.result) { row in
+                    Text(row.result)
+                        .foregroundStyle(row.dismissed ? .secondary : model.resultColor(row.job))
+                        .lineLimit(1)
+                        .help(row.job.lastExit.map(ExitCode.explain) ?? row.result)
+                }
+                .width(min: 80, ideal: 130)
+            }
+            .contextMenu(forSelectionType: Diagnosis.ID.self) { ids in
+                if let row = rows.first(where: { $0.id == ids.first }) {
+                    if row.dismissed {
+                        Button("Restore", systemImage: "tray.and.arrow.up") { model.restore(row.diagnosis) }
+                    } else {
+                        Button("Dismiss", systemImage: "archivebox") { model.dismiss(row.diagnosis) }
                     }
-                    if !model.dismissedDiagnoses.isEmpty {
-                        Section(isExpanded: $showDismissed) {
-                            ForEach(model.dismissedDiagnoses) { d in
-                                ProblemRow(diagnosis: d, dismissed: true).tag(d.id)
-                                    .contextMenu { Button("Restore", systemImage: "tray.and.arrow.up") { model.restore(d) } }
-                            }
-                        } header: {
-                            Text("Dismissed (\(model.dismissedDiagnoses.count))")
-                        }
+                    Divider()
+                    JobMenu(job: row.job)
+                }
+            } primaryAction: { ids in
+                if let row = rows.first(where: { $0.id == ids.first }), !row.job.scope.isReadOnly { model.editorTarget = .edit(row.job) }
+            }
+            .overlay {
+                if rows.isEmpty {
+                    ContentUnavailableView {
+                        Label("Nothing Needs Attention", systemImage: "checkmark.seal")
+                    } description: {
+                        Text("You dismissed \(model.dismissedDiagnoses.count == 1 ? "the only problem" : "every problem"). Dismissed problems don’t count in the menu bar.")
+                    } actions: {
+                        Button("Show Dismissed") { showDismissed = true }
                     }
                 }
-                .listStyle(.sidebar)
-                .frame(minWidth: 300, idealWidth: 380, maxWidth: 460)
-                .safeAreaInset(edge: .bottom) {
-                    Text("The Doctor checks plists, programs, permissions, quarantine, log folders, restart loops and launchd state"
-                         + (model.background == nil ? ". Use Check Login Items to include App Background Activity." : ", plus App Background Activity.")
-                         + " Dismiss a problem you’ve decided to live with; it stays out of the count until something changes.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
+            }
+            .inspector(isPresented: Binding(get: { model.showInspector }, set: { model.showInspector = $0 })) {
                 Group {
                     let all = model.diagnoses + model.dismissedDiagnoses
-                    if let d = all.first(where: { $0.id == model.selectedProblemID }) ?? all.first {
+                    if let d = all.first(where: { $0.id == model.selectedProblemID }) {
                         ProblemDetail(diagnosis: d)
+                    } else {
+                        ContentUnavailableView("No Problem Selected", systemImage: "stethoscope",
+                                               description: Text("Select a problem to see the Doctor’s checks and how to fix it."))
                     }
                 }
-                .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
+                .inspectorColumnWidth(min: 340, ideal: 420, max: 560)
             }
             .toolbar {
+                if !model.dismissedDiagnoses.isEmpty {
+                    ToolbarItem {
+                        Toggle(isOn: $showDismissed) {
+                            Label("Show Dismissed (\(model.dismissedDiagnoses.count))", systemImage: "archivebox")
+                        }
+                        .help(showDismissed ? "Hide the problems you dismissed" : "Also list the \(model.dismissedDiagnoses.count) problem\(model.dismissedDiagnoses.count == 1 ? "" : "s") you dismissed")
+                    }
+                }
                 ToolbarItem {
                     Button { model.checkLoginItems() } label: {
                         Label(model.isCheckingBackground ? "Checking Login Items…" : "Check Login Items…", systemImage: "person.badge.key")
@@ -70,30 +108,64 @@ struct DoctorView: View {
                 }
                 ToolbarItem {
                     Button { Task { await model.refresh() } } label: { Label("Check Again", systemImage: "arrow.clockwise") }
+                        .help("Run the Doctor’s checks again")
                 }
             }
         }
     }
 }
 
-struct ProblemRow: View {
+/// Sortable projection of a diagnosis for the Problems table.
+struct ProblemRow: Identifiable {
     let diagnosis: Diagnosis
-    var dismissed = false
+    let dismissed: Bool
+    let title: String
+    let headline: String
+    let schedule: String
+    let result: String
+
+    init(_ diagnosis: Diagnosis, dismissed: Bool, result: String) {
+        self.diagnosis = diagnosis
+        self.dismissed = dismissed
+        title = diagnosis.job.title
+        headline = diagnosis.primary?.headline ?? ""
+        schedule = diagnosis.job.definition.schedule.summary
+        self.result = result
+    }
+
+    var id: Diagnosis.ID { diagnosis.id }
+    var job: Job { diagnosis.job }
+    /// Errors first, then warnings; dismissed problems last.
+    var severityRank: Int { dismissed ? -1 : (diagnosis.worst?.rawValue ?? 0) }
+}
+
+/// Shape plus color, like the jobs table's status glyph.
+struct ProblemGlyph: View {
+    let row: ProblemRow
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: dismissed ? "archivebox" : diagnosis.worst == .error ? (diagnosis.job.status == .invalid ? "questionmark.diamond.fill" : "exclamationmark.triangle.fill") : "exclamationmark.circle")
-                .foregroundStyle(dismissed ? Color.secondary : diagnosis.job.status == .invalid ? .purple : .orange)
-                .font(.title3)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(diagnosis.job.title).font(.caption).foregroundStyle(.secondary)
-                Text(diagnosis.primary?.headline ?? "").font(.body.weight(.semibold))
-                Text(diagnosis.job.resultSummary + " · " + diagnosis.job.definition.schedule.summary)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-        }
-        .padding(.vertical, 6)
-        .opacity(dismissed ? 0.7 : 1)
+        Image(systemName: symbol)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(color)
+            .frame(width: 19)
+            .help(title)
+            .accessibilityLabel(title)
+    }
+
+    var symbol: String {
+        if row.dismissed { return "archivebox" }
+        if row.job.status == .invalid { return "questionmark.diamond.fill" }
+        return row.diagnosis.worst == .error ? "exclamationmark.triangle.fill" : "exclamationmark.circle"
+    }
+
+    var color: Color {
+        if row.dismissed { return .secondary }
+        return row.job.status == .invalid ? .purple : .orange
+    }
+
+    var title: String {
+        if row.dismissed { return "Dismissed" }
+        return row.diagnosis.worst == .error ? "Error" : "Warning"
     }
 }
 
@@ -105,7 +177,7 @@ struct ProblemDetail: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
                         Text(job.title)
@@ -113,24 +185,25 @@ struct ProblemDetail: View {
                         Text(job.target).font(.caption.monospaced())
                     }
                     .font(.caption).foregroundStyle(.secondary)
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(headline).font(.title2.weight(.bold))
-                        Spacer()
+                    Text(headline).font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                    if let p = diagnosis.primary {
+                        Text(p.detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(spacing: 8) {
                         if let at = diagnosis.dismissedAt(model.dismissals) {
-                            Text("Dismissed \(at.formatted(.relative(presentation: .named)))").font(.caption).foregroundStyle(.secondary)
                             Button("Restore", systemImage: "tray.and.arrow.up") { model.restore(diagnosis) }
                                 .help("Count this problem again and show it in the menu bar")
+                            Text("Dismissed \(at.formatted(.relative(presentation: .named)))").font(.caption).foregroundStyle(.secondary)
                         } else {
                             Button("Dismiss", systemImage: "archivebox") { model.dismiss(diagnosis) }
                                 .help("Stop counting this problem. It comes back if the job develops a different problem.")
                         }
                     }
-                    if let p = diagnosis.primary {
-                        Text(p.detail).font(.body).foregroundStyle(.secondary).frame(maxWidth: 680, alignment: .leading)
-                    }
+                    .controlSize(.small)
+                    .padding(.top, 4)
                 }
 
-                HStack(spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 10)], spacing: 10) {
                     StatCard(title: "Last result", value: job.lastExit.map { $0 == 0 ? "OK" : ($0 < 0 ? ExitCode.short($0) : "Exit \($0)") } ?? "—",
                              note: job.lastExit.map { ExitCode.short($0) } ?? job.status.title, alert: (job.lastExit ?? 0) != 0)
                     StatCard(title: "Launches since load", value: job.runs.map { $0.formatted() } ?? "—", note: job.definition.schedule.summary, alert: false)
@@ -141,16 +214,19 @@ struct ProblemDetail: View {
                     SectionLabel("Checks")
                     VStack(spacing: 0) {
                         ForEach(diagnosis.checks) { c in
-                            HStack(spacing: 10) {
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 CheckMark(passed: c.passed)
-                                Text(c.name)
-                                Spacer()
-                                if let n = c.note {
-                                    Text(n).font(.caption.monospaced()).foregroundStyle(c.passed == false ? .orange : .secondary).lineLimit(1).truncationMode(.middle)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(c.name)
+                                    if let n = c.note {
+                                        Text(n).font(.caption).foregroundStyle(c.passed == false ? .orange : .secondary)
+                                            .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                                    }
                                 }
+                                Spacer(minLength: 0)
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                             .background(c.passed == false ? Color.orange.opacity(0.07) : .clear)
                             if c.id != diagnosis.checks.last?.id { Divider() }
                         }
@@ -163,15 +239,15 @@ struct ProblemDetail: View {
                 if !fixes.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         SectionLabel("Fix it")
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 12)], spacing: 12) {
+                        VStack(spacing: 8) {
                             ForEach(Array(fixes.enumerated()), id: \.offset) { i, fix in
                                 Button { model.apply(fix, to: job) } label: {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(fix.title).fontWeight(.semibold).foregroundStyle(i == 0 ? Color.accentColor : .primary)
                                         Text(fix.detail).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
                                     }
-                                    .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
-                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    .padding(10)
                                     .background(i == 0 ? Color.accentColor.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
                                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(i == 0 ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: i == 0 ? 1.5 : 1))
                                     .contentShape(RoundedRectangle(cornerRadius: 12))
@@ -204,7 +280,7 @@ struct ProblemDetail: View {
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
                 }
             }
-            .padding(28)
+            .padding(18)
         }
     }
 
