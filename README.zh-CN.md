@@ -118,8 +118,11 @@ ldm logs backup -f
 ```text
 ldm list [--status failed|running|disabled|problems] [--scope user|allUsers|system] [--json|--plain]
 ldm show <job> [--json] [--background]
-ldm doctor [<job>] [--json] [--background]
-ldm start|stop|restart|load|unload|enable|disable <job> [--dry-run]
+ldm doctor [<job>] [--all] [--json] [--background]
+ldm dismiss|restore <job>
+ldm start|restart|reload|load|unload|enable|disable <job> [--dry-run] [--json]
+ldm stop <job> [--force] [--timeout <s>] [--no-wait] [--dry-run] [--json]
+ldm signal <job> <HUP|INT|TERM|USR1|USR2|…>
 ldm logs <job> [-n 40] [-f]
 ldm new <name> (--every 15m | --cron "30 9 * * 1" | --keep-alive | --watch <path>) [--log <file>] -- <program> [args…]
 ldm edit <job> [--program <path>] [--every …] [--log <file>] [--dry-run]
@@ -141,6 +144,8 @@ ldm helper
 | 4 | 需要管理员授权，或授权被取消 |
 | 5 | launchd 拒绝了该操作 |
 | 6 | `doctor` 发现了问题 |
+| 7 | 等待 launchd 超时（例如忽略 SIGTERM 的作业） |
+| 64 | 参数无效 |
 
 <a id="why-not-launchcontrol-lingon-or-launchctl"></a>
 

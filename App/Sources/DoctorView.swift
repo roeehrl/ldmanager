@@ -4,9 +4,11 @@ import SwiftUI
 struct DoctorView: View {
     @Environment(AppModel.self) private var model
 
+    @State private var showDismissed = false
+
     var body: some View {
         @Bindable var model = model
-        if model.diagnoses.isEmpty {
+        if model.diagnoses.isEmpty && model.dismissedDiagnoses.isEmpty {
             ContentUnavailableView {
                 Label("No Problems", systemImage: "checkmark.seal")
             } description: {
@@ -16,14 +18,33 @@ struct DoctorView: View {
             }
         } else {
             HSplitView {
-                List(model.diagnoses, selection: $model.selectedProblemID) { d in
-                    ProblemRow(diagnosis: d).tag(d.id)
+                List(selection: $model.selectedProblemID) {
+                    if model.diagnoses.isEmpty {
+                        Label("Nothing needs attention", systemImage: "checkmark.seal")
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 6)
+                    }
+                    ForEach(model.diagnoses) { d in
+                        ProblemRow(diagnosis: d).tag(d.id)
+                            .contextMenu { Button("Dismiss", systemImage: "archivebox") { model.dismiss(d) } }
+                    }
+                    if !model.dismissedDiagnoses.isEmpty {
+                        Section(isExpanded: $showDismissed) {
+                            ForEach(model.dismissedDiagnoses) { d in
+                                ProblemRow(diagnosis: d, dismissed: true).tag(d.id)
+                                    .contextMenu { Button("Restore", systemImage: "tray.and.arrow.up") { model.restore(d) } }
+                            }
+                        } header: {
+                            Text("Dismissed (\(model.dismissedDiagnoses.count))")
+                        }
+                    }
                 }
-                .listStyle(.inset)
+                .listStyle(.sidebar)
                 .frame(minWidth: 300, idealWidth: 380, maxWidth: 460)
                 .safeAreaInset(edge: .bottom) {
                     Text("The Doctor checks plists, programs, permissions, quarantine, log folders, restart loops and launchd state"
-                         + (model.background == nil ? ". Use Check Login Items to include App Background Activity." : ", plus App Background Activity."))
+                         + (model.background == nil ? ". Use Check Login Items to include App Background Activity." : ", plus App Background Activity.")
+                         + " Dismiss a problem you’ve decided to live with; it stays out of the count until something changes.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(12)
@@ -31,7 +52,8 @@ struct DoctorView: View {
                 }
 
                 Group {
-                    if let d = model.diagnoses.first(where: { $0.id == model.selectedProblemID }) ?? model.diagnoses.first {
+                    let all = model.diagnoses + model.dismissedDiagnoses
+                    if let d = all.first(where: { $0.id == model.selectedProblemID }) ?? all.first {
                         ProblemDetail(diagnosis: d)
                     }
                 }
@@ -56,11 +78,12 @@ struct DoctorView: View {
 
 struct ProblemRow: View {
     let diagnosis: Diagnosis
+    var dismissed = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: diagnosis.worst == .error ? (diagnosis.job.status == .invalid ? "questionmark.diamond.fill" : "exclamationmark.triangle.fill") : "exclamationmark.circle")
-                .foregroundStyle(diagnosis.job.status == .invalid ? .purple : .orange)
+            Image(systemName: dismissed ? "archivebox" : diagnosis.worst == .error ? (diagnosis.job.status == .invalid ? "questionmark.diamond.fill" : "exclamationmark.triangle.fill") : "exclamationmark.circle")
+                .foregroundStyle(dismissed ? Color.secondary : diagnosis.job.status == .invalid ? .purple : .orange)
                 .font(.title3)
             VStack(alignment: .leading, spacing: 2) {
                 Text(diagnosis.job.title).font(.caption).foregroundStyle(.secondary)
@@ -70,6 +93,7 @@ struct ProblemRow: View {
             }
         }
         .padding(.vertical, 6)
+        .opacity(dismissed ? 0.7 : 1)
     }
 }
 
@@ -89,7 +113,18 @@ struct ProblemDetail: View {
                         Text(job.target).font(.caption.monospaced())
                     }
                     .font(.caption).foregroundStyle(.secondary)
-                    Text(headline).font(.title2.weight(.bold))
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(headline).font(.title2.weight(.bold))
+                        Spacer()
+                        if let at = diagnosis.dismissedAt(model.dismissals) {
+                            Text("Dismissed \(at.formatted(.relative(presentation: .named)))").font(.caption).foregroundStyle(.secondary)
+                            Button("Restore", systemImage: "tray.and.arrow.up") { model.restore(diagnosis) }
+                                .help("Count this problem again and show it in the menu bar")
+                        } else {
+                            Button("Dismiss", systemImage: "archivebox") { model.dismiss(diagnosis) }
+                                .help("Stop counting this problem. It comes back if the job develops a different problem.")
+                        }
+                    }
                     if let p = diagnosis.primary {
                         Text(p.detail).font(.body).foregroundStyle(.secondary).frame(maxWidth: 680, alignment: .leading)
                     }
@@ -142,7 +177,17 @@ struct ProblemDetail: View {
                                     .contentShape(RoundedRectangle(cornerRadius: 12))
                                 }
                                 .buttonStyle(.plain)
+                                .disabled(model.isBusy(job))
                             }
+                        }
+                        // What the fix is doing, or how it ended.
+                        if let op = model.operations[job.id] {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text(op.phase).font(.caption).foregroundStyle(.secondary)
+                            }
+                        } else if let outcome = model.outcomes[job.id] {
+                            OutcomeLine(job: job, outcome: outcome)
                         }
                     }
                 }

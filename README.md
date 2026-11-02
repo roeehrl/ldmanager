@@ -127,8 +127,11 @@ ldm logs backup -f
 ```text
 ldm list [--status failed|running|disabled|problems] [--scope user|allUsers|system] [--json|--plain]
 ldm show <job> [--json] [--background]
-ldm doctor [<job>] [--json] [--background]
-ldm start|stop|restart|load|unload|enable|disable <job> [--dry-run]
+ldm doctor [<job>] [--all] [--json] [--background]
+ldm dismiss|restore <job>
+ldm start|restart|reload|load|unload|enable|disable <job> [--dry-run] [--json]
+ldm stop <job> [--force] [--timeout <s>] [--no-wait] [--dry-run] [--json]
+ldm signal <job> <HUP|INT|TERM|USR1|USR2|…>
 ldm logs <job> [-n 40] [-f]
 ldm new <name> (--every 15m | --cron "30 9 * * 1" | --keep-alive | --watch <path>) [--log <file>] -- <program> [args…]
 ldm edit <job> [--program <path>] [--every …] [--log <file>] [--dry-run]
@@ -154,6 +157,8 @@ password each time, so without the flag `ldm` uses the last result it read.
 | 4 | Administrator authorization needed or cancelled |
 | 5 | launchd rejected the operation |
 | 6 | `doctor` found problems |
+| 7 | Timed out waiting for launchd (for example, a job that ignores SIGTERM) |
+| 64 | Invalid arguments |
 
 ## Why not LaunchControl, Lingon or launchctl?
 

@@ -41,22 +41,26 @@ struct MenuBarView: View {
                 VStack(spacing: 2) {
                     ForEach(model.pinnedJobs) { job in
                         HStack(spacing: 10) {
-                            StatusGlyph(status: job.status, size: 11)
+                            StatusGlyph(status: model.displayStatus(job), size: 11, title: model.statusTitle(job))
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(job.title)
-                                Text(job.pid.map { "Running · PID \($0)" } ?? job.resultSummary + " · " + job.definition.schedule.summaryInSentence)
+                                Text(model.menuSubtitle(for: job))
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                             Spacer()
-                            Toggle(job.title, isOn: Binding(get: { !job.isDisabled && job.isLoaded }, set: { on in
-                                // A system job may need to offer the helper first, which shows in the main window.
-                                if job.scope.launchctlNeedsAdmin && model.helperState != .enabled { open(nil) }
-                                model.setActive(on, job)
-                            }))
-                                .toggleStyle(.switch)
-                                .controlSize(.mini)
-                                .labelsHidden()
-                                .disabled(job.scope.isReadOnly)
+                            if model.isBusy(job) {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Toggle(job.title, isOn: Binding(get: { !job.isDisabled }, set: { on in
+                                    // A system job may need to offer the helper first, which shows in the main window.
+                                    if job.scope.launchctlNeedsAdmin && model.helperState != .enabled { open(nil) }
+                                    model.setActive(on, job)
+                                }))
+                                    .toggleStyle(.switch)
+                                    .controlSize(.mini)
+                                    .labelsHidden()
+                                    .disabled(job.scope.isReadOnly)
+                            }
                         }
                         .padding(.horizontal, 6)
                         .padding(.vertical, 5)

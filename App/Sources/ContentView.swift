@@ -76,15 +76,15 @@ struct ContentView: View {
         let tableMode = model.sidebar != .problems && model.sidebar != .recent
         if tableMode {
         ToolbarItemGroup {
-            Button { if let job { model.perform(.start, on: job) } } label: { Label("Start", systemImage: "play.fill") }
+            Button { if let job { model.start(job) } } label: { Label("Start", systemImage: "play.fill") }
                 .help("Start (⌘R)")
-                .disabled(job == nil)
+                .disabled(job.map { !model.canStart($0) } ?? true)
             Button { if let job { model.perform(.stop, on: job) } } label: { Label("Stop", systemImage: "stop.fill") }
-                .help("Stop (⌘.)")
-                .disabled(job?.pid == nil)
+                .help(job?.isAppleKeepAlive == true ? "launchd keeps this Apple job running; it can’t be stopped here. Restart is available." : "Stop (⌘.)")
+                .disabled(job.map { !model.canStop($0) } ?? true)
             Button { if let job { model.perform(.restart, on: job) } } label: { Label("Restart", systemImage: "arrow.clockwise") }
                 .help("Restart (⇧⌘R)")
-                .disabled(job == nil)
+                .disabled(job.map { !model.canRestart($0) } ?? true)
         }
         ToolbarSpacer(.fixed)
         }
@@ -168,10 +168,10 @@ struct JobTableView: View {
 
     var body: some View {
         @Bindable var model = model
-        let rows = model.visibleJobs.map(JobRow.init).sorted(using: sortOrder)
+        let rows = model.visibleJobs.map { JobRow($0, result: model.resultText(for: $0)) }.sorted(using: sortOrder)
         Table(rows, selection: $model.selectedJobID, sortOrder: $sortOrder) {
             TableColumn("", value: \.statusRank) { row in
-                StatusGlyph(status: row.job.status)
+                StatusGlyph(status: model.displayStatus(row.job), title: model.statusTitle(row.job))
             }
             .width(26)
             TableColumn("Job", value: \.title) { row in
@@ -192,7 +192,7 @@ struct JobTableView: View {
             .width(min: 44, ideal: 60)
             TableColumn("Result", value: \.result) { row in
                 Text(row.result)
-                    .foregroundStyle(row.job.resultColor)
+                    .foregroundStyle(model.resultColor(row.job))
                     .fontWeight(row.job.status == .failed || row.job.status == .invalid ? .medium : .regular)
                     .lineLimit(1)
                     .help(row.job.lastExit.map(ExitCode.explain) ?? row.result)
@@ -229,11 +229,11 @@ struct JobRow: Identifiable {
     let schedule: String
     let result: String
 
-    init(_ job: Job) {
+    init(_ job: Job, result: String) {
         self.job = job
         title = job.title
         schedule = job.definition.schedule.summary
-        result = job.resultSummary
+        self.result = result
     }
 
     var id: Job.ID { job.id }
@@ -247,15 +247,19 @@ struct JobMenu: View {
     let job: Job
 
     var body: some View {
-        Button("Start", systemImage: "play") { model.perform(.start, on: job) }
-        Button("Stop", systemImage: "stop") { model.perform(.stop, on: job) }.disabled(job.pid == nil)
-        Button("Restart", systemImage: "arrow.clockwise") { model.perform(.restart, on: job) }
+        Button(job.status == .restarting ? "Start Now" : "Start", systemImage: "play") { model.start(job) }.disabled(!model.canStart(job))
+        Button("Stop", systemImage: "stop") { model.perform(.stop, on: job) }.disabled(!model.canStop(job))
+        Button("Force Quit", systemImage: "xmark.octagon") { model.forceQuit(job) }.disabled(!model.canForceQuit(job))
+        Button("Restart", systemImage: "arrow.clockwise") { model.perform(.restart, on: job) }.disabled(!model.canRestart(job))
+        SignalMenu(job: job)
         Divider()
         if !job.scope.isReadOnly {
             Button(job.isDisabled ? "Enable" : "Disable", systemImage: job.isDisabled ? "power" : "pause.circle") { model.setActive(job.isDisabled, job) }
+                .disabled(model.isBusy(job))
             Button(job.isLoaded ? "Unload" : "Load", systemImage: job.isLoaded ? "eject" : "tray.and.arrow.down") {
                 model.perform(job.isLoaded ? .unload : .load, on: job)
             }
+            .disabled(model.isBusy(job))
             Button("Edit…", systemImage: "pencil") { model.editorTarget = .edit(job) }
         }
         Divider()
@@ -265,7 +269,23 @@ struct JobMenu: View {
         if !job.scope.isReadOnly {
             Divider()
             Button("Move to Trash…", systemImage: "trash", role: .destructive) { model.confirmTrash = job }
+                .disabled(model.isBusy(job))
         }
+    }
+}
+
+/// "Send Signal ▸" for jobs that handle signals themselves (reload config, rotate logs…).
+struct SignalMenu: View {
+    @Environment(AppModel.self) private var model
+    let job: Job
+
+    var body: some View {
+        Menu("Send Signal", systemImage: "bolt") {
+            ForEach(["SIGHUP", "SIGINT", "SIGUSR1", "SIGUSR2", "SIGTERM"], id: \.self) { sig in
+                Button(sig) { model.sendSignal(sig, to: job) }
+            }
+        }
+        .disabled(job.pid == nil || model.isBusy(job))
     }
 }
 

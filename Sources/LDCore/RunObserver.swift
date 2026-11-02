@@ -61,6 +61,7 @@ public enum RunObserver {
         let settle: TimeInterval = keepsRunning ? 1.5 : maxRun
         let timeout = keepsRunning ? 6 : maxRun + 1
         let runsBefore = before.runs ?? 0
+        let pidBefore = before.pid
         let hasLog = !LogReader.logPaths(for: before).isEmpty
         let deadline = started.addingTimeInterval(timeout)
         var job = before
@@ -68,21 +69,70 @@ public enum RunObserver {
         while Date() < deadline {
             Thread.sleep(forTimeInterval: 0.25)
             job = Inventory.reload(job)
-            if (job.runs ?? 0) > runsBefore { launched = true }
-            if let pid = job.pid {
-                launched = true
+            // A new launch: more runs, or a different PID. An old PID that is still
+            // shutting down (restart) is not a launch.
+            if (job.runs ?? 0) > runsBefore || (job.pid != nil && job.pid != pidBefore) { launched = true }
+            if let pid = job.pid, launched {
                 if Date().timeIntervalSince(started) >= settle { return outcome(.running(pid: pid)) }
-            } else if launched {
+            } else if launched, job.pid == nil {
                 return outcome(.finished(exit: job.lastExit))
             }
         }
-        if let pid = job.pid { return outcome(.running(pid: pid)) }
+        if let pid = job.pid, launched { return outcome(.running(pid: pid)) }
         return outcome(launched ? .finished(exit: job.lastExit) : .didNotStart)
 
         func outcome(_ r: RunOutcome.Result) -> RunOutcome {
             let after = logStamp(job)
             let changed: Bool? = hasLog ? (after.map { a in logBefore.map { a > $0 } ?? true } ?? false) : nil
             return RunOutcome(result: r, started: started, logChanged: changed)
+        }
+    }
+}
+
+/// What happened after Stop / Force Quit / unload.
+public enum StopOutcome: Equatable, Sendable {
+    /// The process exited; the job stays loaded (no KeepAlive).
+    case stopped(pid: Int?, exit: Int?, seconds: TimeInterval)
+    /// Unloaded so launchd doesn't restart it (KeepAlive).
+    case unloaded(pid: Int?, seconds: TimeInterval, wasRestarting: Bool)
+    case alreadyStopped(notLoaded: Bool)
+    /// Something (KeepAlive, its app, another tool) started it again.
+    case restarted(newPid: Int)
+    /// It quit, but launchd has already scheduled a restart (its loaded copy keeps it alive).
+    case willRestart
+    /// Still there when we gave up waiting.
+    case stillRunning(pid: Int)
+    case forceQuit(pid: Int?)
+
+    public var succeeded: Bool {
+        switch self {
+        case .stopped, .unloaded, .alreadyStopped, .forceQuit: true
+        case .restarted, .willRestart, .stillRunning: false
+        }
+    }
+}
+
+public enum StopObserver {
+    /// Follows a signal-based stop (no KeepAlive) until the process is gone, a new
+    /// one appears, or `timeout` passes. `before` is the job just before the signal.
+    public static func observe(_ before: Job, started: Date, timeout: TimeInterval = 60, force: Bool = false,
+                               reload: (Job) -> Job = { Inventory.reload($0) },
+                               sleeper: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+                               clock: () -> Date = { Date() },
+                               onTick: ((Job, TimeInterval) -> Void)? = nil) -> StopOutcome {
+        let pidBefore = before.pid
+        var job = before
+        while true {
+            sleeper(0.25)
+            job = reload(job)
+            let elapsed = clock().timeIntervalSince(started)
+            onTick?(job, elapsed)
+            if let pid = job.pid, pid != pidBefore { return .restarted(newPid: pid) }
+            if job.pid == nil {
+                if !force && (job.launchdState == .spawnScheduled || (job.runs ?? 0) > (before.runs ?? 0)) { return .willRestart }
+                return force ? .forceQuit(pid: pidBefore) : .stopped(pid: pidBefore, exit: job.lastExit, seconds: elapsed)
+            }
+            if elapsed >= timeout { return .stillRunning(pid: job.pid ?? pidBefore ?? 0) }
         }
     }
 }

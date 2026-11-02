@@ -10,34 +10,48 @@ public struct Schedule: Sendable {
     public let queueDirectories: [String]
     public let startOnMount: Bool
     public let onDemandServices: Bool
+    /// KeepAlive starts it by itself (see `JobDefinition.keepAliveStartsIt`).
+    public let keepAliveStarts: Bool
     public let isDaemon: Bool
+    /// The plist couldn't be read here (root-only, or only launchd can parse it).
+    public let unknown: Bool
 
     public init(definition d: JobDefinition) {
+        unknown = d.contentsUnknown
         startInterval = d.startInterval
         calendar = d.calendarIntervals
         keepAlive = d.keepAlive
         runAtLoad = d.runAtLoad
-        watchPaths = d.watchPaths
-        queueDirectories = d.queueDirectories
+        // launchd ignores entries that don't start with / or ~.
+        let watchable = { (p: String) in p.hasPrefix("/") || p.hasPrefix("~") }
+        watchPaths = d.watchPaths.filter(watchable)
+        queueDirectories = d.queueDirectories.filter(watchable)
         startOnMount = d.startOnMount
-        onDemandServices = d.hasSocketsOrMachServices
+        keepAliveStarts = d.keepAliveStartsIt
+        // Sockets, Mach services and launch events (XPC events) start it on demand;
+        // the legacy OnDemand=false means "keep alive".
+        let events = (d.raw["LaunchEvents"] as? [String: Any])?.values.contains { ($0 as? [String: Any])?.isEmpty == false } ?? false
+        onDemandServices = d.hasSocketsOrMachServices || events || JobDefinition.strictBool(d.raw["OnDemand"]) == false
         isDaemon = d.scope.isDaemon
     }
 
     public var hasTrigger: Bool {
         startInterval != nil || !calendar.isEmpty || runAtLoad || !watchPaths.isEmpty
             || !queueDirectories.isEmpty || startOnMount || onDemandServices
-            || (keepAlive != nil && keepAlive != .never)
+            || keepAliveStarts
     }
 
     /// "Every 30 minutes · at login"
     public var summary: String {
+        if unknown { return "Unknown" }
         var parts: [String] = []
         switch keepAlive {
         case .always: parts.append("Always running")
         case .onFailure: parts.append("Restarts when it fails")
         case .onSuccess: parts.append("Restarts after it succeeds")
-        case .conditional(let keys): parts.append("Kept alive when " + keys.map(Self.keepAliveWords).joined(separator: ", "))
+        case .conditional(let keys):
+            let words = keys.filter { $0 != "AfterInitialDemand" }.map(Self.keepAliveWords).joined(separator: ", ")
+            parts.append("Kept alive when " + words + (keys.contains("AfterInitialDemand") ? " after it’s first started" : ""))
         case .never, .none: break
         }
         if let s = startInterval { parts.append(Self.describe(interval: s)) }
@@ -48,7 +62,7 @@ public struct Schedule: Sendable {
         if !queueDirectories.isEmpty { parts.append("When files arrive in \((queueDirectories[0] as NSString).lastPathComponent)") }
         if startOnMount { parts.append("When a volume mounts") }
         // KeepAlive implies starting at load; don't repeat it.
-        if runAtLoad && (keepAlive == nil || keepAlive == .never) {
+        if runAtLoad && !keepAliveStarts {
             parts.append(isDaemon ? "at boot" : "at login")
         }
         if parts.isEmpty { return onDemandServices ? "When another process asks for it" : "On demand" }
@@ -98,11 +112,15 @@ public struct Schedule: Sendable {
         case (nil, nil): time = "every minute"
         }
         var when: String
+        let monthName = month.flatMap { (1...12).contains($0) ? monthNames[$0] : nil }
         if let w = weekday, (0...7).contains(w) {
+            // With Day as well, launchd runs on either one (like cron).
             when = weekdayNames[w]
+            if let d = day { when += monthName.map { " and day \(d) in \($0)" } ?? " and on day \(d) of each month" }
+            else if let mo = monthName { when += " in \(mo)" }
         } else if let d = day {
             when = "On day \(d)"
-            if let mo = month, (1...12).contains(mo) { when += " of \(monthNames[mo])" } else { when += " of each month" }
+            if let mo = monthName { when += " of \(mo)" } else { when += " of each month" }
         } else if let mo = month, (1...12).contains(mo) {
             when = "Every day in \(monthNames[mo])"
         } else {
@@ -111,30 +129,46 @@ public struct Schedule: Sendable {
         return when.isEmpty ? time.prefix(1).uppercased() + time.dropFirst() : "\(when) \(time)"
     }
 
-    /// The next few calendar-triggered run times after `date`.
+    /// The next few calendar-triggered run times after `date`. Day 31 only matches
+    /// months that have one, and Day with Weekday matches either (as launchd does).
     public func nextRuns(after date: Date = Date(), count: Int = 4) -> [Date] {
-        guard !calendar.isEmpty else { return [] }
+        let patterns = calendar.flatMap(Self.datePatterns)
+        guard !patterns.isEmpty else { return [] }
         let cal = Calendar.current
         var results: [Date] = []
         var cursor = date
         for _ in 0..<count {
             var best: Date?
-            for c in calendar {
-                var comps = DateComponents()
-                comps.minute = c["Minute"]
-                comps.hour = c["Hour"]
-                comps.day = c["Day"]
-                comps.month = c["Month"]
-                if let w = c["Weekday"] { comps.weekday = (w % 7) + 1 }  // launchd 0=Sun, Calendar 1=Sun
-                if comps.minute == nil { comps.second = 0 }
-                if let next = cal.nextDate(after: cursor, matching: comps, matchingPolicy: .nextTime) {
-                    if best == nil || next < best! { best = next }
-                }
+            for comps in patterns {
+                guard let next = cal.nextDate(after: cursor, matching: comps, matchingPolicy: .strict),
+                      comps.day == nil || cal.component(.day, from: next) == comps.day else { continue }
+                if best == nil || next < best! { best = next }
             }
             guard let b = best else { break }
             results.append(b)
             cursor = b.addingTimeInterval(1)
         }
         return results
+    }
+
+    /// One calendar entry as Calendar search patterns: two when it has both Day and
+    /// Weekday, none when a value is out of range.
+    static func datePatterns(_ c: [String: Int]) -> [DateComponents] {
+        let ranges: [String: ClosedRange<Int>] = ["Minute": 0...59, "Hour": 0...23, "Day": 1...31, "Weekday": 0...7, "Month": 1...12]
+        guard ranges.allSatisfy({ key, range in c[key].map(range.contains) ?? true }) else { return [] }
+        var base = DateComponents()
+        base.minute = c["Minute"]
+        base.hour = c["Hour"]
+        base.month = c["Month"]
+        if base.minute == nil { base.second = 0 }
+        var byDay = base, byWeekday = base
+        byDay.day = c["Day"]
+        byWeekday.weekday = c["Weekday"].map { ($0 % 7) + 1 }  // launchd 0=Sun, Calendar 1=Sun
+        switch (c["Day"], c["Weekday"]) {
+        case (_?, _?): return [byDay, byWeekday]
+        case (_?, nil): return [byDay]
+        case (nil, _?): return [byWeekday]
+        case (nil, nil): return [base]
+        }
     }
 }

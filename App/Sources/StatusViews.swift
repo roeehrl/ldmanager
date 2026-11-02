@@ -5,32 +5,37 @@ import SwiftUI
 struct StatusGlyph: View {
     let status: JobStatus
     var size: CGFloat = 13
+    /// Overrides the status title in the tooltip ("Stopped", "Stopping…").
+    var title: String?
 
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: size, weight: .semibold))
             .foregroundStyle(color)
             .frame(width: size + 6)
-            .help(status.title)
-            .accessibilityLabel(status.title)
+            .help(title ?? status.title)
+            .accessibilityLabel(title ?? status.title)
     }
 
     var symbol: String {
         switch status {
         case .running: "circle.fill"
+        case .stopping: "stop.circle"
+        case .restarting: "arrow.triangle.2.circlepath"
         case .idle: "circle"
         case .failed: "exclamationmark.triangle.fill"
         case .disabled: "pause.circle"
         case .blocked: "nosign"
         case .notLoaded: "circle.dashed"
         case .invalid: "questionmark.diamond.fill"
+        case .placeholder: "doc"
         }
     }
 
     var color: Color {
         switch status {
-        case .running: .green
-        case .idle, .disabled, .notLoaded: .secondary
+        case .running, .restarting: .green
+        case .idle, .disabled, .notLoaded, .stopping, .placeholder: .secondary
         case .failed, .blocked: .orange
         case .invalid: .purple
         }

@@ -21,11 +21,12 @@ struct LDM: ParsableCommand {
 
         Exit codes: 0 ok · 1 error · 2 usage or ambiguous name · 3 no such job ·
         4 authorization needed or cancelled · 5 launchd rejected the operation ·
-        6 doctor found problems.
+        6 doctor found problems · 7 timed out waiting for launchd ·
+        64 invalid arguments.
         """,
-        version: "0.1.2",
-        subcommands: [List.self, Show.self, Doctor.self, Start.self, Stop.self, Restart.self, Load.self, Unload.self,
-                      Enable.self, Disable.self, Logs.self, New.self, Edit.self, Remove.self, Explain.self, HelperStatus.self]
+        version: "0.1.3",
+        subcommands: [List.self, Show.self, Doctor.self, Start.self, Stop.self, Restart.self, Signal.self, Reload.self, Load.self, Unload.self,
+                      Enable.self, Disable.self, Logs.self, New.self, Edit.self, Remove.self, Explain.self, Dismiss.self, Restore.self, HelperStatus.self]
     )
 }
 
@@ -74,10 +75,41 @@ struct Common: ParsableArguments {
 func guarded(_ body: () throws -> Void) throws {
     do {
         try body()
+    } catch LDError.launchctl(let f) {
+        Progress.current?.clear()
+        let label = f.argv.last?.split(separator: "/").last.map(String.init) ?? ""
+        let explanation = f.status == 119 ? "\(f.title.map { "“\($0)”" } ?? label) is disabled. Run `ldm enable \(label)` first." : f.explanation
+        printErr(Style.red("error: ") + explanation)
+        printErr(Style.dim("  " + f.details))
+        throw ExitCode(Exit.code(for: LDError.launchctl(f)))
     } catch let e as LDError {
+        Progress.current?.clear()
         printErr(Style.red("error: ") + (e.errorDescription ?? "\(e)"))
         throw ExitCode(Exit.code(for: e))
     }
+}
+
+/// Without the helper, every privileged launchctl call would ask for a password.
+/// Runs this whole command as root instead, behind one prompt, and relays its output.
+func elevateIfNeeded(_ job: Job) throws -> Bool {
+    guard job.scope.launchctlNeedsAdmin, getuid() != 0, !Privileged.usesHelper,
+          let exe = Bundle.main.executableURL?.resolvingSymlinksInPath().path else { return false }
+    let argv = [exe] + CommandLine.arguments.dropFirst()
+    let r = Shell.runAsAdmin([["/bin/sh", "-c", Shell.commandLine(argv) + " 2>&1; echo \"__ldm_status=$?\""]])
+    if r.status == 4 {
+        printErr(Style.red("error: ") + "Administrator authorization was cancelled.")
+        throw ExitCode(Exit.authorization)
+    }
+    var lines = (r.succeeded ? r.stdout : r.message).replacingOccurrences(of: "\r", with: "\n").components(separatedBy: "\n")
+    while lines.last?.isEmpty == true { lines.removeLast() }
+    var status: Int32 = r.succeeded ? 0 : Exit.general
+    if let last = lines.last, last.hasPrefix("__ldm_status=") {
+        status = Int32(last.dropFirst("__ldm_status=".count)) ?? Exit.general
+        lines.removeLast()
+    }
+    if !lines.isEmpty { print(lines.joined(separator: "\n")) }
+    if status != 0 { throw ExitCode(status) }
+    return true
 }
 
 // MARK: - list
@@ -165,24 +197,34 @@ struct Doctor: ParsableCommand {
 
     @OptionGroup var common: Common
     @Argument(help: "Check one job (default: every job).") var name: String?
+    @Flag(help: "Also show problems you dismissed (ldm dismiss).") var all = false
 
     func run() throws {
         common.setup()
         var found = false
         try guarded {
-            let diagnoses: [Diagnosis]
+            var diagnoses: [Diagnosis]
+            var hidden = 0
+            let dismissals = Dismissals.load()
             if let n = name {
+                // Asking about one job always shows it, dismissed or not.
                 diagnoses = [LDCore.Doctor.diagnose(try common.resolveFull(n))]
             } else {
-                diagnoses = LDCore.Doctor.problems(in: common.loadJobs())
+                let triage = LDCore.Doctor.triage(common.loadJobs(), dismissals: dismissals)
+                diagnoses = triage.active + (all ? triage.dismissed : [])
+                hidden = all ? 0 : triage.dismissed.count
             }
-            found = diagnoses.contains { $0.isProblem }
-            if common.json { return emitJSON(diagnoses.map(DiagnosisJSON.init)) }
-            if diagnoses.isEmpty { print(Style.green("✓ ") + "No problems found."); return }
+            // Dismissed problems don't count towards the exit code.
+            found = diagnoses.contains { $0.isProblem && $0.dismissedAt(dismissals) == nil }
+            if common.json { return emitJSON(diagnoses.map { DiagnosisJSON($0, dismissals: dismissals) }) }
+            let hiddenNote = hidden > 0 ? Style.dim("  (\(hidden) dismissed — ldm doctor --all to show)") : ""
+            if diagnoses.isEmpty { print(Style.green("✓ ") + "No problems found." + hiddenNote); return }
+            defer { if hidden > 0 { print(""); print(hiddenNote.trimmingCharacters(in: .whitespaces)) } }
             for (i, d) in diagnoses.enumerated() {
                 if i > 0 { print("") }
                 let headline = d.primary?.headline ?? "No problems"
-                print(Style.bold("\(d.job.title): \(headline)") + "  " + Style.dim(d.job.label))
+                let tag = d.dismissedAt(dismissals) != nil ? Style.dim(" [dismissed]") : ""
+                print(Style.bold("\(d.job.title): \(headline)") + tag + "  " + Style.dim(d.job.label))
                 for c in d.checks {
                     let mark = c.passed == true ? Style.green("✓") : c.passed == false ? Style.red("✗") : Style.dim("–")
                     print("  \(mark) \(c.name)" + (c.note.map { Style.dim(" — \($0)") } ?? ""))
@@ -203,6 +245,8 @@ struct Doctor: ParsableCommand {
         switch fix {
         case .disable: return "ldm disable \(n)"
         case .load: return "ldm load \(n)"
+        case .restart: return "ldm restart \(n)"
+        case .trash: return "ldm remove \(n)"
         case .chooseProgram: return "ldm edit \(n) --program /path/to/program"
         case .editPlist: return "open \(Shell.quote(job.definition.url.path))"
         case .openTerminal(let dir): return "cd \(Shell.quote(dir))"
@@ -217,68 +261,205 @@ struct Doctor: ParsableCommand {
 
 // MARK: - actions
 
-protocol ActionCommand: ParsableCommand {
+/// Runs an action body, recording the launchctl commands it sends.
+func recording(_ body: () throws -> ActionReport) throws -> (ActionReport, [[String]]) {
+    let log = CommandLog()
+    let report = try CommandLog.$current.withValue(log) { try body() }
+    return (report, log.commands)
+}
+
+/// Prints an action's report and turns a warning into exit 5, or 7 when it timed out.
+func finish(_ verb: String, _ job: Job, _ report: ActionReport, common: Common, commands: [[String]] = [], started: Date = Date()) throws {
+    Progress.current?.clear()
+    if common.json {
+        emitJSON(ActionJSON(action: verb, label: job.label, report: report, before: job, commands: commands,
+                            seconds: Date().timeIntervalSince(started), after: Inventory.reload(job)))
+    } else {
+        let mark: String
+        switch report.tone {
+        case .success: mark = Style.green("✓ ")
+        case .info: mark = Style.dim("ⓘ ")
+        case .warning, .failure: mark = Style.orange("▲ ")
+        }
+        var summary = report.summary
+        if report.offerForceQuit { summary += " · rerun with `ldm stop --force \(job.shortName)`" }
+        if report.offerKeepOff && report.tone == .warning { summary += " · `ldm disable \(job.shortName)` keeps it off" }
+        print(mark + "\(verb) \(job.label)  " + Style.dim(summary))
+    }
+    switch report.tone {
+    case .success, .info: return
+    case .warning, .failure: throw ExitCode(report.timedOut ? Exit.timedOut : Exit.launchd)
+    }
+}
+
+/// Prints the --dry-run plan of an action.
+func printPlan(_ steps: [Launchctl.Step], job: Job) {
+    print(Style.dim(steps.isEmpty ? "nothing to do" : "would run" + (job.scope.launchctlNeedsAdmin ? " (as administrator):" : ":")))
+    steps.forEach { print("  " + $0.rendered) }
+}
+
+struct Start: ParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Run a job now (loads and enables it first if needed).")
+    @OptionGroup var common: Common
+    @Argument var name: String
+    @Flag(name: [.customShort("n"), .long], help: "Print the launchctl commands instead of running them.") var dryRun = false
+
+    func run() throws {
+        common.setup()
+        try guarded {
+            let job = Inventory.reload(try common.resolve(name))
+            if dryRun { return printPlan(Launchctl.plan(for: .start, job: job), job: job) }
+            if try elevateIfNeeded(job) { return }
+            let progress = Progress(label: job.label, enabled: !common.json)
+            let started = Date()
+            let (report, commands) = try recording { try Lifecycle.start(job, onPhase: progress.show) }
+            try finish("start", job, report, common: common, commands: commands, started: started)
+        }
+    }
+}
+
+struct Stop: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Stop a job and keep it stopped.",
+        discussion: """
+        A job without KeepAlive gets SIGTERM and stays loaded, so its schedule still \
+        applies. A KeepAlive job is unloaded so launchd doesn't restart it; it stays \
+        stopped until you start it or log in again. Use disable to keep it off for good.
+        """
+    )
+    @OptionGroup var common: Common
+    @Argument var name: String
+    @Flag(help: "SIGKILL it (a KeepAlive job: after unloading, if it hasn't quit within --timeout).") var force = false
+    @Option(help: "Seconds to wait for it to quit (default 60; 10 with --force).") var timeout: Int?
+    @Flag(help: "Send the stop and return without waiting.") var noWait = false
+    @Flag(name: [.customShort("n"), .long], help: "Print the launchctl commands instead of running them.") var dryRun = false
+
+    func run() throws {
+        common.setup()
+        try guarded {
+            let job = Inventory.reload(try common.resolve(name))
+            if job.isAppleKeepAlive {
+                printErr(Style.red("error: ") + "launchd keeps this Apple job running; it can’t be stopped. Use ldm restart or ldm signal.")
+                throw ExitCode(Exit.authorization)
+            }
+            if dryRun {
+                var steps = Launchctl.plan(for: force && !job.restartsOnItsOwn ? .forceQuit : .stop, job: job)
+                if force && job.restartsOnItsOwn && !steps.isEmpty {
+                    steps = noWait ? [steps[0], .run([Launchctl.path, "kill", "SIGKILL", job.target])]
+                        : [steps[0], .waitUntilGone(target: job.target, seconds: timeout ?? 10), .run([Launchctl.path, "kill", "SIGKILL", job.target])]
+                } else if noWait {
+                    steps = steps.filter { if case .run = $0 { true } else { false } }
+                }
+                return printPlan(steps, job: job)
+            }
+            if try elevateIfNeeded(job) { return }
+            let wording = Lifecycle.Wording.cli(job)
+            let progress = Progress(label: job.label, enabled: !common.json)
+            let started = Date()
+            let (report, commands) = try recording {
+                if noWait { return try Lifecycle.sendStop(job, force: force, wording: wording) }
+                if force { return try Lifecycle.forceStop(job, timeout: TimeInterval(timeout ?? 10), wording: wording, onPhase: progress.show) }
+                return try Lifecycle.stop(job, timeout: TimeInterval(timeout ?? 60), wording: wording, onPhase: progress.show)
+            }
+            try finish("stop", job, report, common: common, commands: commands, started: started)
+        }
+    }
+}
+
+struct Restart: ParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Stop a job and start a fresh copy (starts it if it isn't running).")
+    @OptionGroup var common: Common
+    @Argument var name: String
+    @Flag(name: [.customShort("n"), .long], help: "Print the launchctl commands instead of running them.") var dryRun = false
+
+    func run() throws {
+        common.setup()
+        try guarded {
+            let job = Inventory.reload(try common.resolve(name))
+            if dryRun { return printPlan(Launchctl.plan(for: job.pid == nil ? .start : .restart, job: job), job: job) }
+            if try elevateIfNeeded(job) { return }
+            let progress = Progress(label: job.label, enabled: !common.json)
+            let started = Date()
+            let (report, commands) = try recording { try Lifecycle.restart(job, onPhase: progress.show) }
+            try finish("restart", job, report, common: common, commands: commands, started: started)
+        }
+    }
+}
+
+struct Signal: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Send a signal to a running job (it stays loaded; KeepAlive jobs may restart).",
+        discussion: "Signals: SIGTERM, SIGKILL, SIGINT, SIGHUP, SIGQUIT, SIGUSR1, SIGUSR2 (or TERM, HUP…)."
+    )
+    @OptionGroup var common: Common
+    @Argument var name: String
+    @Argument var signal: String
+    @Flag(name: [.customShort("n"), .long], help: "Print the launchctl command instead of running it.") var dryRun = false
+
+    func run() throws {
+        common.setup()
+        try guarded {
+            let job = Inventory.reload(try common.resolve(name))
+            let sig = try Lifecycle.signalName(signal)
+            if dryRun { return printPlan(job.pid == nil ? [] : [.run([Launchctl.path, "kill", sig, job.target])], job: job) }
+            if try elevateIfNeeded(job) { return }
+            let started = Date()
+            let (report, commands) = try recording { try Lifecycle.signal(sig, job: job) }
+            try finish("signal", job, report, common: common, commands: commands, started: started)
+        }
+    }
+}
+
+struct Reload: ParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Unload a job and load it again from its plist, waiting for the old copy to quit.")
+    @OptionGroup var common: Common
+    @Argument var name: String
+    @Flag(name: [.customShort("n"), .long], help: "Print the launchctl commands instead of running them.") var dryRun = false
+
+    func run() throws {
+        common.setup()
+        try guarded {
+            let job = Inventory.reload(try common.resolve(name))
+            if dryRun { return printPlan(Launchctl.plan(for: .unload, job: job) + Launchctl.plan(for: .load, job: job.notLoaded), job: job) }
+            if try elevateIfNeeded(job) { return }
+            let progress = Progress(label: job.label, enabled: !common.json)
+            let started = Date()
+            let (report, commands) = try recording { try Lifecycle.reload(job, onPhase: progress.show) }
+            try finish("reload", job, report, common: common, commands: commands, started: started)
+        }
+    }
+}
+
+/// Load and enable: one launchctl sequence, then the job's new state.
+protocol SimpleActionCommand: ParsableCommand {
     static var action: Launchctl.Action { get }
     var common: Common { get }
     var name: String { get }
     var dryRun: Bool { get }
 }
 
-extension ActionCommand {
+extension SimpleActionCommand {
     func run() throws {
         common.setup()
         try guarded {
             let job = Inventory.reload(try common.resolve(name))
-            let cmds = Launchctl.commands(for: Self.action, job: job)
-            if dryRun {
-                print(Style.dim(cmds.isEmpty ? "nothing to do" : "would run" + (job.scope.launchctlNeedsAdmin ? " (as administrator):" : ":")))
-                cmds.forEach { print("  " + Shell.commandLine($0)) }
-                return
-            }
-            let logBefore = RunObserver.logStamp(job)
+            if dryRun { return printPlan(Launchctl.plan(for: Self.action, job: job), job: job) }
+            if try elevateIfNeeded(job) { return }
+            let progress = Progress(label: job.label, enabled: !common.json)
             let started = Date()
-            try Launchctl.perform(Self.action, on: job)
-            if Self.action == .start || Self.action == .restart {
-                // Many jobs run for a moment and exit; report what actually happened.
-                let outcome = RunObserver.observe(job, started: started, logBefore: logBefore)
-                if common.json { return emitJSON(JobJSON(Inventory.reload(job))) }
-                let mark = outcome.succeeded ? Style.green("✓ ") : Style.orange("▲ ")
-                print(mark + "\(Self.action.rawValue) \(job.label)  " + Style.dim(outcome.summary))
-                if !outcome.succeeded { throw ExitCode(Exit.launchd) }
-                return
+            let (report, commands) = try recording {
+                if Self.action == .unload || Self.action == .disable {
+                    return try Lifecycle.takeDown(Self.action, job, onPhase: progress.show)
+                }
+                try Launchctl.perform(Self.action, on: job)
+                return ActionReport(tone: .success, summary: Inventory.reload(job).status.title, short: "", result: Self.action.rawValue)
             }
-            let after = Inventory.reload(job)
-            if common.json { return emitJSON(JobJSON(after)) }
-            print(Style.green("✓ ") + "\(Self.action.rawValue) \(job.label)  " + Style.dim(after.status.title))
+            try finish(Self.action.rawValue, job, report, common: common, commands: commands, started: started)
         }
     }
 }
 
-struct Start: ActionCommand {
-    static let configuration = CommandConfiguration(abstract: "Run a job now (loads it first if needed).")
-    static let action = Launchctl.Action.start
-    @OptionGroup var common: Common
-    @Argument var name: String
-    @Flag(name: [.customShort("n"), .long], help: "Print the launchctl commands instead of running them.") var dryRun = false
-}
-
-struct Stop: ActionCommand {
-    static let configuration = CommandConfiguration(abstract: "Send SIGTERM to a running job. KeepAlive jobs restart; use disable to keep them down.")
-    static let action = Launchctl.Action.stop
-    @OptionGroup var common: Common
-    @Argument var name: String
-    @Flag(name: [.customShort("n"), .long], help: "Print the launchctl commands instead of running them.") var dryRun = false
-}
-
-struct Restart: ActionCommand {
-    static let configuration = CommandConfiguration(abstract: "Kill and immediately restart a job.")
-    static let action = Launchctl.Action.restart
-    @OptionGroup var common: Common
-    @Argument var name: String
-    @Flag(name: [.customShort("n"), .long], help: "Print the launchctl commands instead of running them.") var dryRun = false
-}
-
-struct Load: ActionCommand {
+struct Load: SimpleActionCommand {
     static let configuration = CommandConfiguration(abstract: "Load (bootstrap) a job into launchd.")
     static let action = Launchctl.Action.load
     @OptionGroup var common: Common
@@ -286,7 +467,7 @@ struct Load: ActionCommand {
     @Flag(name: [.customShort("n"), .long], help: "Print the launchctl commands instead of running them.") var dryRun = false
 }
 
-struct Unload: ActionCommand {
+struct Unload: SimpleActionCommand {
     static let configuration = CommandConfiguration(abstract: "Unload (bootout) a job from launchd until next login or boot.")
     static let action = Launchctl.Action.unload
     @OptionGroup var common: Common
@@ -294,7 +475,7 @@ struct Unload: ActionCommand {
     @Flag(name: [.customShort("n"), .long], help: "Print the launchctl commands instead of running them.") var dryRun = false
 }
 
-struct Enable: ActionCommand {
+struct Enable: SimpleActionCommand {
     static let configuration = CommandConfiguration(abstract: "Enable a job persistently and load it.")
     static let action = Launchctl.Action.enable
     @OptionGroup var common: Common
@@ -302,7 +483,7 @@ struct Enable: ActionCommand {
     @Flag(name: [.customShort("n"), .long], help: "Print the launchctl commands instead of running them.") var dryRun = false
 }
 
-struct Disable: ActionCommand {
+struct Disable: SimpleActionCommand {
     static let configuration = CommandConfiguration(abstract: "Unload a job and disable it persistently (survives reboots).")
     static let action = Launchctl.Action.disable
     @OptionGroup var common: Common
@@ -472,11 +653,34 @@ struct Edit: ParsableCommand {
             }
             if dryRun { return }
             let backup = try PlistEditor.write(new, to: job.definition.url, scope: job.scope)
+            let saved = Style.green("✓ saved") + Style.dim(backup.map { "  backup: \(LDCore.Doctor.abbreviate($0.path))" } ?? "")
             if !noReload && job.isLoaded {
-                try Launchctl.perform(.unload, on: job)
-                try Launchctl.perform(.load, on: Inventory.reload(job))
+                let progress = Progress(label: job.label, enabled: true)
+                let result: Launchctl.Result
+                do {
+                    result = try Launchctl.reload(old: job, new: Inventory.reload(job)) { detail, elapsed in
+                        progress.show("reloading" + (detail?.pid.map { " (PID \($0))" } ?? "") + ", \(Int(elapsed)) s…")
+                    }
+                } catch let e as LDError {
+                    progress.clear()
+                    print(saved)
+                    let why: String
+                    if case .launchctl(let f) = e { why = f.explanation } else { why = e.errorDescription ?? "\(e)" }
+                    print(Style.orange("▲ ") + "edit \(job.label)  " + Style.dim("saved · but it isn’t loaded now: \(why) · run `ldm start \(job.shortName)`"))
+                    throw ExitCode(Exit.code(for: e))
+                }
+                progress.clear()
+                if case .notReloadedDisabled = result {
+                    print(saved + Style.dim("  · not reloaded: it’s disabled (`ldm enable \(job.shortName)` loads it)"))
+                    return
+                }
+                if case .stillUnloading(let pid) = result {
+                    print(Style.orange("▲ ") + "edit \(job.label)  " + Style.dim("saved · the old copy" + (pid.map { " (PID \($0))" } ?? "")
+                        + " didn’t quit within \(Launchctl.bootoutWait(job)) s, so the new settings aren’t loaded yet · run `ldm start \(job.shortName)`"))
+                    throw ExitCode(Exit.timedOut)
+                }
             }
-            print(Style.green("✓ saved") + Style.dim(backup.map { "  backup: \(LDCore.Doctor.abbreviate($0.path))" } ?? ""))
+            print(saved)
         }
     }
 }
@@ -533,6 +737,40 @@ struct HelperStatus: ParsableCommand {
         } else {
             print("helper not reachable — install and approve it in LD Manager (sidebar or Settings)")
             throw ExitCode(Exit.authorization)
+        }
+    }
+}
+
+struct Dismiss: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Stop counting a job's current problems (in ldm doctor and the app). They come back if the job develops a different problem."
+    )
+    @OptionGroup var common: Common
+    @Argument(help: "Job name or label.") var name: String
+
+    func run() throws {
+        common.setup()
+        try guarded {
+            let d = LDCore.Doctor.diagnose(try common.resolveFull(name))
+            guard d.isProblem else { print("\(d.job.label) has no problems to dismiss."); return }
+            try Dismissals.dismiss(d)
+            print(Style.green("✓ ") + "dismissed: \(d.primary?.headline ?? "") " + Style.dim(d.job.label))
+        }
+    }
+}
+
+struct Restore: ParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Count a job's dismissed problems again.")
+    @OptionGroup var common: Common
+    @Argument(help: "Job name or label.") var name: String
+
+    func run() throws {
+        common.setup()
+        try guarded {
+            let job = try common.resolve(name)
+            let had = Dismissals.load().contains { $0.label == job.label }
+            try Dismissals.restore(label: job.label)
+            print(had ? Style.green("✓ ") + "restored problems of \(job.label)" : "\(job.label) had no dismissed problems.")
         }
     }
 }

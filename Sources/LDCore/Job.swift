@@ -1,17 +1,38 @@
 import Foundation
 
+/// launchd's own view of a loaded job, from `launchctl print`'s `state` field.
+public enum LaunchdState: Equatable, Sendable {
+    case running, spawning, stopping, spawnScheduled, notRunning
+    case other(String)
+
+    public init?(_ text: String?) {
+        guard let text else { return nil }
+        switch text {
+        case "running": self = .running
+        case "xpcproxy": self = .spawning
+        case "SIGTERMed": self = .stopping
+        case "spawn scheduled": self = .spawnScheduled
+        case "not running": self = .notRunning
+        default: self = .other(text)
+        }
+    }
+}
+
 public enum JobStatus: String, Codable, Sendable, CaseIterable {
-    case running, idle, failed, disabled, blocked, notLoaded, invalid
+    case running, stopping, restarting, idle, failed, disabled, blocked, notLoaded, invalid, placeholder
 
     public var title: String {
         switch self {
         case .running: "Running"
+        case .stopping: "Stopping"
+        case .restarting: "Restarting soon"
         case .idle: "Loaded, waiting"
         case .failed: "Last run failed"
         case .disabled: "Disabled"
         case .blocked: "Off in Login Items"
         case .notLoaded: "Not loaded"
         case .invalid: "Invalid plist"
+        case .placeholder: "Empty placeholder"
         }
     }
 
@@ -23,8 +44,9 @@ public enum JobStatus: String, Codable, Sendable, CaseIterable {
         case .blocked: 2
         case .disabled: 2
         case .notLoaded: 3
-        case .running: 4
+        case .running, .stopping, .restarting: 4
         case .idle: 5
+        case .placeholder: 6
         }
     }
 }
@@ -69,20 +91,49 @@ public struct Job: Identifiable, @unchecked Sendable {
 
     /// KeepAlive keeps restarting it and it keeps failing. Between respawns the job
     /// briefly has a PID, so this deliberately ignores whether it is running right now.
+    /// KeepAlive keeps restarting it and it keeps failing: launchd is throttling
+    /// it (spawn scheduled after ≥ 3 runs), or it has piled up launches. A polite
+    /// stop (SIGTERM…) never counts. Between respawns it briefly has a PID, so a
+    /// high run count alone keeps it in the loop state without flicker.
     public var isRestartLooping: Bool {
-        guard let keep = definition.keepAlive, keep != .never,
-              let runs, runs > 100, let exit = lastExit, exit != 0 else { return false }
-        return true
+        guard restartsOnItsOwn, let runs, let exit = lastExit, ExitCode.isFailure(exit) else { return false }
+        if runs > 100 { return true }
+        return runs >= 3 && pid == nil && launchdState == .spawnScheduled
+    }
+
+    public var launchdState: LaunchdState? { LaunchdState(detail?.state) }
+
+    /// launchd starts it again by itself when it exits (any KeepAlive setting).
+    public var restartsOnItsOwn: Bool {
+        guard let k = definition.keepAlive else { return false }
+        return k != .never
+    }
+
+    /// An Apple job launchd keeps running: it can't be stopped from here.
+    public var isAppleKeepAlive: Bool { scope.isReadOnly && restartsOnItsOwn }
+
+    /// Stopping this KeepAlive job means unloading it: it is running, quitting, or
+    /// about to be restarted. An idle one (a conditional KeepAlive that is satisfied)
+    /// has nothing to stop, and unloading it would silence its other triggers.
+    /// The same job as launchd would see it unloaded (for planning a reload).
+    public var notLoaded: Job { Job(definition: definition, listing: nil, detail: nil, override: override, background: background) }
+
+    public var stopUnloads: Bool {
+        restartsOnItsOwn && (pid != nil || launchdState == .spawnScheduled || launchdState == .stopping)
     }
 
     public var status: JobStatus {
-        if definition.parseError != nil || definition.declaredLabel == nil { return .invalid }
+        if definition.isEmptyPlaceholder { return .placeholder }
+        if definition.parseError != nil || (definition.declaredLabel == nil && !definition.contentsUnknown) { return .invalid }
         if isDisabled && !isLoaded { return .disabled }
         if isBlockedInBackground && pid == nil { return .blocked }
         if isRestartLooping { return .failed }
-        if pid != nil { return .running }
         if !isLoaded { return .notLoaded }
-        if let e = lastExit, e != 0 { return .failed }
+        if launchdState == .stopping { return .stopping }
+        if pid != nil { return .running }
+        // KeepAlive job between runs: launchd allows one start per ThrottleInterval.
+        if launchdState == .spawnScheduled && restartsOnItsOwn { return .restarting }
+        if let e = lastExit, ExitCode.isFailure(e) { return .failed }
         return .idle
     }
 
@@ -132,14 +183,18 @@ public struct Job: Identifiable, @unchecked Sendable {
         switch status {
         case .invalid:
             return definition.parseError != nil ? "Invalid plist" : "Invalid · no Label key"
+        case .placeholder: return "Empty placeholder"
+        case .stopping: return "Stopping…"
+        case .restarting: return "Restarting soon"
         case .disabled: return "Disabled"
         case .blocked: return background?.summary ?? "Off in Login Items"
         case .notLoaded: return "Not loaded"
         default: break
         }
         guard let e = lastExit else { return status == .running ? "Running" : "Not run yet" }
-        if e == 0 { return "OK" }
+        if e == 0 { return status == .running ? "Running" : "OK" }
         let what = ExitCode.short(e)
+        if ExitCode.isPoliteStop(e) { return status == .running ? "Running" : "Stopped (\(what))" }
         if status == .running { return "Previous: \(what)" }
         if isRestartLooping, let r = runs {
             return "\(what) · \(r.formatted()) restarts"

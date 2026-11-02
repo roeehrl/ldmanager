@@ -197,7 +197,7 @@ import Testing
         let job = Job(definition: JobDefinition(url: URL(fileURLWithPath: "/tmp/com.example.nolabel.plist"), scope: .user, raw: ["ProgramArguments": ["/bin/true"]]),
                       listing: nil, detail: nil, override: nil)
         #expect(job.status == .invalid)
-        #expect(Doctor.diagnose(job).findings.contains { $0.headline == "Plist has no Label key" })
+        #expect(Doctor.diagnose(job).findings.contains { $0.id == "label" && $0.severity == .error })
     }
 }
 
@@ -403,5 +403,41 @@ import Testing
         #expect(RunOutcome(result: .running(pid: 42), started: now, logChanged: nil).summary == "Running now as PID 42")
         #expect(!RunOutcome(result: .didNotStart, started: now, logChanged: nil).succeeded)
         #expect(RunOutcome(result: .finished(exit: nil), started: now, logChanged: nil).succeeded)
+    }
+}
+
+@Suite struct DismissingProblems {
+    func noLabelJob(_ label: String) -> Job {
+        Job(definition: JobDefinition(url: URL(fileURLWithPath: "/tmp/\(label).plist"), scope: .user,
+                                      raw: ["Label": label, "ProgramArguments": ["/nonexistent/tool"], "StartInterval": 60]),
+            listing: nil, detail: nil, override: nil)
+    }
+
+    @Test func dismissRestoreAndPrune() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ldm-dismiss-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let a = noLabelJob("com.example.a"), b = noLabelJob("com.example.b")
+        let diagA = Doctor.diagnose(a)
+        #expect(diagA.isProblem)
+
+        try Dismissals.dismiss(diagA, at: url)
+        var d = Dismissals.load(from: url)
+        let t = Doctor.triage([a, b], dismissals: d)
+        #expect(t.active.map(\.job.label) == ["com.example.b"])
+        #expect(t.dismissed.map(\.job.label) == ["com.example.a"])
+
+        // A different problem for the same job shows again.
+        let changed = Finding(id: "program", severity: .error, headline: "Something new", detail: "", fixes: [])
+        let diagChanged = Diagnosis(job: a, checks: [], findings: [changed])
+        #expect(diagChanged.dismissedAt(d) == nil)
+
+        // Fixed problems drop their dismissal.
+        Dismissals.prune(current: [Doctor.diagnose(b)], at: url)
+        #expect(Dismissals.load(from: url).isEmpty)
+
+        try Dismissals.dismiss(diagA, at: url)
+        try Dismissals.restore(label: "com.example.a", at: url)
+        d = Dismissals.load(from: url)
+        #expect(d.isEmpty)
     }
 }

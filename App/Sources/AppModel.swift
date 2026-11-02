@@ -17,7 +17,11 @@ enum SidebarItem: Hashable {
 final class AppModel {
     var jobs: [Job] = []
     var appleJobs: [Job] = []
+    /// Problems that need attention: not dismissed by the user.
     var diagnoses: [Diagnosis] = []
+    /// Problems the user dismissed; shown in a collapsed section, restorable.
+    var dismissedDiagnoses: [Diagnosis] = []
+    var dismissals: [Dismissal] = Dismissals.load()
     var backups: [PlistEditor.Backup] = []
 
     var sidebar: SidebarItem = .scope(.user) {
@@ -31,9 +35,16 @@ final class AppModel {
     /// so it only happens when the user clicks Check Login Items.
     var background: BackgroundItems.Snapshot? = BackgroundItems.cached()
     var isCheckingBackground = false
-    /// The outcome of the last Run/Restart per job, shown in the inspector.
-    var runFeedback: [Job.ID: RunOutcome] = [:]
-    var runsInProgress: Set<Job.ID> = []
+    /// The action running on each job; at most one per job.
+    var operations: [Job.ID: JobOperation] = [:]
+    /// How each job's last action ended, shown until the next action on it.
+    var outcomes: [Job.ID: ActionOutcome] = [:]
+    /// KeepAlive jobs the user stopped (unloaded until Start or the next login). Not persisted.
+    var stoppedByRequest: [Job.ID: Date] = [:]
+    var forceQuitAt: [Job.ID: Date] = [:]
+    /// Operations ended by the 90 s cap whose real result may still arrive.
+    @ObservationIgnored var lateTokens: Set<UUID> = []
+    @ObservationIgnored private var refreshQueued = false
     var selectedJobID: Job.ID?
     var selectedProblemID: Diagnosis.ID?
     var search = ""
@@ -65,15 +76,52 @@ final class AppModel {
 
     // MARK: Data
 
-    func refresh() async {
-        guard !isRefreshing else { return }
+    /// `force`: if a refresh is already running, run another one after it (its
+    /// snapshot may predate the change the caller just made).
+    func refresh(force: Bool = false) async {
+        guard !isRefreshing else {
+            if force { refreshQueued = true }
+            return
+        }
         isRefreshing = true
+        defer {
+            if refreshQueued {
+                refreshQueued = false
+                Task { await refresh() }
+            }
+        }
+        let began = Date()
         let snapshot = background
         let loaded = await Task.detached(priority: .userInitiated) { Inventory.load(.init(background: snapshot)) }.value
         jobs = loaded
-        diagnoses = await Task.detached { Doctor.problems(in: loaded) }.value
-        if selectedProblemID == nil || !diagnoses.contains(where: { $0.id == selectedProblemID }) {
-            selectedProblemID = diagnoses.first?.id
+        // A stopped KeepAlive job reads "Stopped" until it is loaded or disabled again.
+        for (id, at) in stoppedByRequest where at < began {
+            if let j = loaded.first(where: { $0.id == id }), !j.isLoaded && !j.isDisabled { continue }
+            stoppedByRequest[id] = nil
+        }
+        let stopped = Set(stoppedByRequest.keys)
+        let triage = await Task.detached { () -> (active: [Diagnosis], dismissed: [Diagnosis], all: [Dismissal]) in
+            let all = Doctor.problems(in: loaded)
+            // Forget dismissals of problems that are gone, so a fixed problem that comes back shows again.
+            Dismissals.prune(current: all, jobs: loaded)
+            let d = Dismissals.load()
+            // "It isn't loaded" is expected right after the user stopped it.
+            let stoppedOK = { (diagnoses: [Diagnosis]) in
+                diagnoses.compactMap { dg -> Diagnosis? in
+                    guard stopped.contains(dg.id) else { return dg }
+                    let kept = Diagnosis(job: dg.job, checks: dg.checks, findings: dg.findings.filter { $0.id != "loaded" })
+                    return kept.isProblem ? kept : nil
+                }
+            }
+            let t = Doctor.triage(loaded, dismissals: d)
+            return (stoppedOK(t.active), stoppedOK(t.dismissed), d)
+        }.value
+        diagnoses = triage.active
+        dismissedDiagnoses = triage.dismissed
+        dismissals = triage.all
+        let visible = diagnoses + dismissedDiagnoses
+        if selectedProblemID == nil || !visible.contains(where: { $0.id == selectedProblemID }) {
+            selectedProblemID = diagnoses.first?.id ?? dismissedDiagnoses.first?.id
         }
         if sidebar == .recent { backups = PlistEditor.backups() }
         hasLoaded = true
@@ -134,6 +182,7 @@ final class AppModel {
     var helperRevoked = false
     var helperBannerVisible = false
     @ObservationIgnored private var pendingPrivileged: (() -> Void)?
+    @ObservationIgnored private var pendingPrivilegedCancel: (() -> Void)?
     @ObservationIgnored private var approvalPoll: Task<Void, Never>?
     @ObservationIgnored let guidePanel = HelperGuidePanel()
 
@@ -194,18 +243,20 @@ final class AppModel {
     }
 
     /// Runs `action`, first offering the helper when it needs root and the helper isn't on.
-    func withPrivilege(_ needed: Bool, reason: String, _ action: @escaping () -> Void) {
+    /// `onCancel` runs instead of `action` if the user backs out, so callers never wait forever.
+    func withPrivilege(_ needed: Bool, reason: String, onCancel: (() -> Void)? = nil, _ action: @escaping () -> Void) {
         guard needed, helperState != .enabled, helperState != .unsigned else { return action() }
         if helperDeclined || helperSetupPhase != .idle {
             helperBannerVisible = true
             return action()
         }
-        privilegeRequest = PrivilegeRequest(reason: reason, action: action)
+        privilegeRequest = PrivilegeRequest(reason: reason, action: action, onCancel: onCancel)
     }
 
     /// Registers the helper, guides the user through approval, then runs `action`.
-    func setUpHelper(then action: (() -> Void)?) {
+    func setUpHelper(then action: (() -> Void)?, orCancel cancel: (() -> Void)? = nil) {
         pendingPrivileged = action
+        pendingPrivilegedCancel = cancel
         helperBannerVisible = false
         // register() reports "needs approval" as an error; the status is what counts.
         try? helperService.register()
@@ -219,17 +270,18 @@ final class AppModel {
             guidePanel.show(model: self)
             startApprovalPolling()
         case .notBundled:
-            pendingPrivileged = nil
+            dropPendingPrivileged()
             errorMessage = "macOS couldn’t find LD Manager’s helper in this copy of the app. Build it with scripts/build-app.sh, or move the app to Applications and try again."
         case .unsigned:
-            pendingPrivileged = nil
+            dropPendingPrivileged()
             errorMessage = "The helper needs LD Manager signed with a Developer ID or Apple Development certificate."
         case .notInstalled:
-            pendingPrivileged = nil
+            dropPendingPrivileged()
             errorMessage = "macOS didn’t register the helper. Try again, or remove LD Manager from \(LoginItemsWording.section) and retry."
         case .broken:
             let action = pendingPrivileged
             pendingPrivileged = nil
+            pendingPrivilegedCancel = nil
             Task {
                 await repairHelper()
                 if let action {
@@ -247,9 +299,18 @@ final class AppModel {
         if let action = pendingPrivileged {
             // They started something; finish it the old way rather than dropping it.
             pendingPrivileged = nil
+            pendingPrivilegedCancel = nil
             helperBannerVisible = true
             action()
         }
+    }
+
+    /// The privileged action won't run after all: tell whoever is waiting on it.
+    private func dropPendingPrivileged() {
+        pendingPrivileged = nil
+        let cancel = pendingPrivilegedCancel
+        pendingPrivilegedCancel = nil
+        cancel?()
     }
 
     func declineHelper(andRun action: @escaping () -> Void) {
@@ -276,6 +337,7 @@ final class AppModel {
                     return
                 }
             }
+            self?.dropPendingPrivileged()
         }
     }
 
@@ -302,6 +364,7 @@ final class AppModel {
                 NSApp.activate()
                 if let action = pendingPrivileged {
                     pendingPrivileged = nil
+                    pendingPrivilegedCancel = nil
                     action()
                 }
                 await refreshBackgroundIfSilent()
@@ -399,44 +462,12 @@ final class AppModel {
 
     // MARK: Actions
 
-    func perform(_ action: Launchctl.Action, on job: Job) {
-        withPrivilege(job.scope.launchctlNeedsAdmin, reason: "Changing the system daemon “\(job.title)” needs administrator rights.") { [weak self] in
-            self?.performNow(action, on: job)
-        }
-    }
-
-    private func performNow(_ action: Launchctl.Action, on job: Job) {
-        let observes = action == .start || action == .restart
-        if observes {
-            runFeedback[job.id] = nil
-            runsInProgress.insert(job.id)
-        }
-        Task {
-            do {
-                let logBefore = RunObserver.logStamp(job)
-                let started = Date()
-                _ = try await Task.detached { try Launchctl.perform(action, on: job) }.value
-                if observes {
-                    // Many jobs run for a moment and exit, so say what actually happened.
-                    let outcome = await Task.detached { RunObserver.observe(job, started: started, logBefore: logBefore) }.value
-                    runFeedback[job.id] = outcome
-                }
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            runsInProgress.remove(job.id)
-            await refresh()
-        }
-    }
-
-    func setActive(_ active: Bool, _ job: Job) {
-        perform(active ? .enable : .disable, on: job)
-    }
-
     func apply(_ fix: Fix, to job: Job) {
         switch fix {
-        case .disable: perform(.disable, on: job)
+        case .disable: perform(.turnOff, on: job)
         case .load: perform(.load, on: job)
+        case .restart: perform(.restart, on: job)
+        case .trash: confirmTrash = job
         case .chooseProgram, .editPlist: editorTarget = .edit(job)
         case .openLoginItems: openLoginItemsSettings()
         case .revealPlist: reveal(job)
@@ -474,6 +505,22 @@ final class AppModel {
             if !r.succeeded { errorMessage = r.message.isEmpty ? "The command failed." : r.message }
             await refresh()
         }
+    }
+
+    // MARK: Dismissing problems
+
+    func dismiss(_ diagnosis: Diagnosis) {
+        do { try Dismissals.dismiss(diagnosis) } catch { errorMessage = "Couldn’t dismiss it: \(error.localizedDescription)" }
+        Task { await refresh() }
+    }
+
+    func restore(_ diagnosis: Diagnosis) {
+        do { try Dismissals.restore(label: diagnosis.job.label) } catch { errorMessage = "Couldn’t restore it: \(error.localizedDescription)" }
+        Task { await refresh() }
+    }
+
+    func isDismissed(_ diagnosis: Diagnosis) -> Bool {
+        dismissedDiagnoses.contains { $0.id == diagnosis.id }
     }
 
     func reveal(_ job: Job) {
@@ -515,16 +562,17 @@ final class AppModel {
     }
 
     private func restoreNow(_ backup: PlistEditor.Backup, to url: URL, scope: JobScope) {
+        if let job = jobs.first(where: { $0.definition.url == url }), let op = operations[job.id] {
+            errorMessage = "Wait for \(op.kind.verb) to finish, then restore “\(job.title)”."
+            return
+        }
         Task {
             do {
                 let def = JobDefinition.load(url: backup.url, scope: scope)
                 if let err = def.parseError { throw LDError.invalid(err) }
                 _ = try await Task.detached { try PlistEditor.write(def.raw, to: url, scope: scope) }.value
                 if let job = jobs.first(where: { $0.definition.url == url }), job.isLoaded {
-                    try await Task.detached {
-                        try Launchctl.perform(.unload, on: job)
-                        try Launchctl.perform(.load, on: Inventory.reload(job))
-                    }.value
+                    reload(job, verb: "Restored")
                 }
             } catch {
                 errorMessage = error.localizedDescription
