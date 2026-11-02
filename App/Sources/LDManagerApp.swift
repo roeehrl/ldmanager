@@ -39,21 +39,25 @@ struct JobCommands: Commands {
         }
         CommandMenu("Job") {
             let job = model.selectedJob
-            Button("Start") { if let job { model.perform(.start, on: job) } }
+            Button(job?.status == .restarting ? "Start Now" : "Start") { if let job { model.start(job) } }
                 .keyboardShortcut("r")
-                .disabled(job == nil)
+                .disabled(job.map { !model.canStart($0) } ?? true)
             Button("Stop") { if let job { model.perform(.stop, on: job) } }
                 .keyboardShortcut(".")
-                .disabled(job?.pid == nil)
+                .disabled(job.map { !model.canStop($0) } ?? true)
+            Button("Force Quit") { if let job { model.forceQuit(job) } }
+                .keyboardShortcut(".", modifiers: [.command, .option])
+                .disabled(job.map { !model.canForceQuit($0) } ?? true)
             Button("Restart") { if let job { model.perform(.restart, on: job) } }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(job == nil)
+                .disabled(job.map { !model.canRestart($0) } ?? true)
+            if let job { SignalMenu(job: job) }
             Divider()
             Button(job?.isDisabled == true ? "Enable" : "Disable") {
                 if let job { model.setActive(job.isDisabled, job) }
             }
             .keyboardShortcut("e", modifiers: [.command, .shift])
-            .disabled(job == nil || job?.scope.isReadOnly == true)
+            .disabled(job == nil || job?.scope.isReadOnly == true || job.map(model.isBusy) == true || model.isSheetOpen)
             Button("Edit…") { if let job { model.editorTarget = .edit(job) } }
                 .keyboardShortcut("e")
                 .disabled(job == nil || job?.scope.isReadOnly == true)
@@ -68,7 +72,7 @@ struct JobCommands: Commands {
             Divider()
             Button("Move to Trash…") { if let job { model.confirmTrash = job } }
                 .keyboardShortcut(.delete, modifiers: [.command])
-                .disabled(job == nil || job?.scope.isReadOnly == true)
+                .disabled(job == nil || job?.scope.isReadOnly == true || job.map(model.isBusy) == true || model.isSheetOpen)
             Divider()
             Button("Refresh") { Task { await model.refresh() } }
                 .keyboardShortcut("r", modifiers: [.command, .control])

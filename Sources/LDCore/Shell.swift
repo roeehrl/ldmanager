@@ -14,10 +14,13 @@ public struct ShellResult: Sendable {
 }
 
 public enum Shell {
+    /// Status reported when a command is stopped for exceeding its timeout.
+    public static let timedOutStatus: Int32 = -2
+
     /// Runs an executable and captures its output. Output is decoded leniently:
     /// invalid UTF-8 (common in job logs) is replaced, never fatal.
     @discardableResult
-    public static func run(_ executable: String, _ arguments: [String]) -> ShellResult {
+    public static func run(_ executable: String, _ arguments: [String], timeout: TimeInterval? = nil) -> ShellResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -38,9 +41,20 @@ public enum Shell {
             outData = out.fileHandleForReading.readDataToEndOfFile()
             group.leave()
         }
+        // A watchdog ends a command that hangs; launchctl can block on a stuck job.
+        var timedOut = false
+        if let timeout {
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                if process.isRunning { timedOut = true; process.terminate() }
+            }
+        }
         let errData = err.fileHandleForReading.readDataToEndOfFile()
         group.wait()
         process.waitUntilExit()
+        if timedOut {
+            return ShellResult(status: timedOutStatus, stdout: String(decoding: outData, as: UTF8.self),
+                               stderr: "Timed out after \(Int(timeout ?? 0)) s.")
+        }
         return ShellResult(
             status: process.terminationStatus,
             stdout: String(decoding: outData, as: UTF8.self),
@@ -79,6 +93,19 @@ public enum Shell {
         if result.stderr.contains("User canceled") || result.stderr.contains("(-128)") {
             return ShellResult(status: 4, stdout: "", stderr: "Administrator authorization was cancelled.")
         }
-        return result
+        return result.succeeded ? result : unwrapAdminFailure(result)
+    }
+
+    /// `do shell script` reports a failed command as osascript status 1 with
+    /// "…execution error: <message> (<status>)". Recover the command's own status
+    /// and message so callers see what actually failed.
+    static func unwrapAdminFailure(_ r: ShellResult) -> ShellResult {
+        let text = r.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let marker = text.range(of: "execution error: "),
+              let open = text.range(of: " (", options: .backwards), open.lowerBound > marker.upperBound,
+              text.hasSuffix(")"),
+              let status = Int32(text[open.upperBound..<text.index(before: text.endIndex)]) else { return r }
+        let message = String(text[marker.upperBound..<open.lowerBound])
+        return ShellResult(status: status, stdout: r.stdout, stderr: message)
     }
 }

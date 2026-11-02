@@ -30,6 +30,13 @@ public enum ExitCode {
         78: ("EX_CONFIG", "configuration error — for launchd jobs usually a missing or non-executable program"),
     ]
 
+    /// SIGTERM, SIGINT and SIGHUP end a job politely (Stop, unload, logout,
+    /// Ctrl-C); they aren't failures. SIGKILL and crash signals are.
+    public static func isPoliteStop(_ code: Int) -> Bool { [-15, -2, -1].contains(code) }
+
+    /// A last exit worth reporting as a failure.
+    public static func isFailure(_ code: Int) -> Bool { code != 0 && !isPoliteStop(code) }
+
     /// "Exit 78 · config error", "SIGTERM"
     public static func short(_ code: Int) -> String {
         if code == 0 { return "OK" }

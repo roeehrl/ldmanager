@@ -15,6 +15,7 @@ struct PrivilegeRequest: Identifiable {
     let id = UUID()
     let reason: String
     let action: () -> Void
+    var onCancel: (() -> Void)?
 }
 
 /// Asked in context, the first time the user does something that needs root.
@@ -45,7 +46,10 @@ struct HelperPromptSheet: View {
             }
             .labelStyle(.titleAndIcon)
             HStack {
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button("Cancel", role: .cancel) {
+                    dismiss()
+                    request.onCancel?()
+                }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Use Password Instead") {
@@ -54,7 +58,7 @@ struct HelperPromptSheet: View {
                 }
                 Button("Continue") {
                     dismiss()
-                    model.setUpHelper(then: request.action)
+                    model.setUpHelper(then: request.action, orCancel: request.onCancel)
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)

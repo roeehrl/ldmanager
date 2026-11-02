@@ -44,90 +44,135 @@ struct InspectorView: View {
     }
 
     @ViewBuilder var activeCard: some View {
+        let op = model.operations[job.id]
         VStack(alignment: .leading, spacing: 12) {
             if job.scope.isReadOnly {
                 Label("Apple job on the read-only system volume. You can start or stop it, but not change it.", systemImage: "lock")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
-                Toggle(isOn: Binding(get: { !job.isDisabled && job.isLoaded }, set: { model.setActive($0, job) })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Keep this job active").fontWeight(.semibold)
-                        Text(activeExplanation).font(.caption).foregroundStyle(.secondary)
+                HStack(alignment: .center) {
+                    // The switch is the "for good" control: a temporary Stop never flips it.
+                    Toggle(isOn: Binding(get: { switchIsOn(op) }, set: { model.setActive($0, job) })) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Keep this job active").fontWeight(.semibold)
+                            Text(activeExplanation).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(op != nil || job.status == .invalid || job.status == .placeholder)
+                    if op?.kind == .turnOn || op?.kind == .turnOff {
+                        ProgressView().controlSize(.small)
                     }
                 }
-                .toggleStyle(.switch)
             }
-            HStack(spacing: 8) {
-                primaryButton
-                if job.pid != nil {
-                    Button("Stop") { model.perform(.stop, on: job) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                        .frame(maxWidth: .infinity)
-                        .help(job.definition.keepAlive.map { $0 != .never } == true ? "launchd restarts KeepAlive jobs; turn the switch off to keep it stopped." : "Send SIGTERM")
-                }
-            }
-            runStatus
+            buttons(op)
+            statusSlot(op)
         }
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
     }
 
-    @ViewBuilder var primaryButton: some View {
-        if job.status == .disabled || job.status == .notLoaded, !job.scope.isReadOnly {
-            Button("Enable & Start") {
-                model.perform(.enable, on: job)
-                model.perform(.start, on: job)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .frame(maxWidth: .infinity)
-        } else if job.pid != nil {
-            Button("Restart") { model.perform(.restart, on: job) }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .frame(maxWidth: .infinity)
-        } else {
-            Button("Run Now") { model.perform(.start, on: job) }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .frame(maxWidth: .infinity)
-                .disabled(model.runsInProgress.contains(job.id))
+    func switchIsOn(_ op: JobOperation?) -> Bool {
+        switch op?.kind {
+        case .turnOn: true
+        case .turnOff, .keepOff: false
+        default: !job.isDisabled
         }
     }
 
-    /// What happened after Run Now / Restart, so a job that runs briefly and exits
-    /// doesn't look like it did nothing.
-    @ViewBuilder var runStatus: some View {
-        if model.runsInProgress.contains(job.id) {
+    @ViewBuilder func buttons(_ op: JobOperation?) -> some View {
+        let layout = model.layout(for: job)
+        let stopping = op?.kind == .stop || (op == nil && job.status == .stopping)
+        if layout.primary != nil || layout.showsStop || op?.canForceQuit == true {
+            HStack(spacing: 8) {
+                if let primary = layout.primary {
+                    let running = op.map { $0.kind == primary.kind || (primary == .enableAndStart && $0.kind == .start) } ?? false
+                    Button { model.perform(primary.kind, on: job) } label: {
+                        busyLabel(running ? (op?.kind.progressWord ?? primary.title) : primary.title, busy: running)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
+                    .disabled(op != nil || stopping)
+                    .accessibilityLabel("\(primary.title) \(job.title)")
+                }
+                if layout.showsStop {
+                    Button { model.perform(.stop, on: job) } label: {
+                        busyLabel(stopping ? "Stopping…" : "Stop", busy: stopping)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
+                    .disabled(op != nil || stopping)
+                    .help(stopHelp)
+                    .accessibilityLabel("Stop \(job.title)")
+                    .accessibilityHint(stopHelp)
+                }
+                if op?.canForceQuit == true {
+                    Button { model.forceQuit(job) } label: { busyLabel("Force Quit", busy: op?.forceQuitSent == true) }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .controlSize(.large)
+                        .disabled(op?.forceQuitSent == true)
+                        .help("Send SIGKILL: it quits at once, without cleaning up (⌥⌘.)")
+                }
+            }
+        }
+    }
+
+    func busyLabel(_ title: String, busy: Bool) -> some View {
+        HStack(spacing: 6) {
+            if busy { ProgressView().controlSize(.mini) }
+            Text(title)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    var stopHelp: String {
+        job.restartsOnItsOwn
+            ? "Stops it and unloads it until you click Start or log in again, so launchd doesn’t restart it. To keep it off for good, turn off Keep this job active. (⌘.)"
+            : "Sends SIGTERM and waits for it to quit (⌘.)"
+    }
+
+    /// What is happening now, or how the last action ended.
+    @ViewBuilder func statusSlot(_ op: JobOperation?) -> some View {
+        if let op {
             HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text(job.pid.map { "Running as PID \($0)… waiting for it to finish" } ?? "Starting…")
-                    .font(.caption).foregroundStyle(.secondary)
+                ProgressView().controlSize(.small).accessibilityLabel(op.phase)
+                Text(op.phase).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-        } else if let outcome = model.runFeedback[job.id] {
-            Label {
-                Text("\(outcome.started.formatted(date: .omitted, time: .standard)): \(outcome.summary)")
-                    .font(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
-            } icon: {
-                Image(systemName: outcome.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(outcome.succeeded ? .green : .orange)
-            }
-            .help(outcome.result == .didNotStart ? "launchd recorded no new launch. It may be throttling restarts (at most every 10 s), or the job is disabled." : "")
+            .accessibilityElement(children: .combine)
+        } else if let outcome = model.outcomes[job.id] {
+            OutcomeLine(job: job, outcome: outcome)
         }
     }
 
     var activeExplanation: String {
+        let login = job.scope.isDaemon ? "boot" : "login"
+        if model.isStoppedByRequest(job) {
+            return "On, but stopped until you click Start or " + (job.scope.isDaemon ? "restart the Mac." : "log in again.")
+        }
+        if job.isDisabled && job.isLoaded {
+            return "Off — still loaded until you log out; launchd won’t start it again."
+        }
         switch job.status {
-        case .disabled: "Off — launchd won’t start it, not even at \(job.scope.isDaemon ? "boot" : "login")."
-        case .notLoaded: "Enabled but not loaded — its triggers do nothing yet."
-        case .running: "On — running now as PID \(job.pid ?? 0)."
-        case .invalid: "launchd can’t load this plist."
+        case .disabled: return "Off — launchd won’t start it, not even at \(login)."
+        case .notLoaded: return "On, but not loaded right now — it loads at your next \(login). Click Start to load it now."
+        case .running:
+            let pid = job.pid ?? 0
+            if job.launchdState == .spawning { return "On — starting as PID \(pid)." }
+            return "On — running now as PID \(pid)." + (job.restartsOnItsOwn ? " launchd restarts it if it quits." : "")
+        case .stopping: return "On — waiting for PID \(job.pid ?? 0) to quit."
+        case .restarting:
+            let t = job.definition.throttleInterval
+            return "On — launchd starts it again within \(t) s (it allows one start every \(t) s)."
+        case .invalid: return "launchd can’t load this plist."
+        case .placeholder: return "This file defines no job, so there’s nothing to run."
         default:
-            "On — launchd starts it: \(job.definition.schedule.summaryInSentence)."
+            if job.definition.contentsUnknown { return "On — LD Manager can’t read its plist, so when it runs is unknown." }
+            return "On — launchd starts it: \(job.definition.schedule.summaryInSentence)."
                 + (isShortLived ? " Each run is brief, so it’s normally not running in between." : "")
         }
     }
@@ -141,15 +186,15 @@ struct InspectorView: View {
     var layers: some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionLabel("Status at every layer")
-            layerRow("Plist file", passed: job.definition.parseError == nil && job.definition.declaredLabel != nil,
-                     value: job.definition.parseError == nil ? (job.definition.declaredLabel == nil ? "No Label key" : "Valid · \(Doctor.abbreviate(job.definition.url.deletingLastPathComponent().path))") : "Invalid")
+            layerRow("Plist file", passed: plistState.passed, value: plistState.text)
             layerRow("launchd override", passed: job.override.map { !$0 }, value: job.override.map { $0 ? "Disabled" : "Enabled" } ?? "None (uses plist)")
             layerRow("Loaded", passed: job.isLoaded ? true : nil, value: job.isLoaded ? "Yes · \(job.target)" : "No")
+            layerRow("launchd state", passed: nil, value: job.detail?.state ?? (job.isLoaded ? "—" : "not loaded"))
             backgroundRow
             let program = Doctor.diagnose(job).checks.first { $0.id == "program" }
             layerRow("Program", passed: program?.passed, value: program?.passed == false ? (program?.note ?? "Problem") : (program?.passed == true ? "Exists, executable" : "—"))
             if let e = job.lastExit {
-                layerRow("Last exit", passed: e == 0, value: ExitCode.short(e))
+                layerRow("Last exit", passed: !ExitCode.isFailure(e), value: ExitCode.short(e))
                     .help(ExitCode.explain(e))
             }
             if let r = job.runs { layerRow("Launches", passed: nil, value: r.formatted()) }
@@ -179,6 +224,16 @@ struct InspectorView: View {
             }
             .font(.callout)
         }
+    }
+
+    var plistState: (passed: Bool?, text: String) {
+        let def = job.definition
+        if def.unreadable { return (nil, "Root-only · launchd reads it, LD Manager can’t") }
+        if def.lenientOnly { return (nil, "launchd reads it · LD Manager can’t check it") }
+        if def.isEmptyPlaceholder { return (nil, "Empty placeholder · defines no job") }
+        if def.parseError != nil { return (false, "Invalid") }
+        if def.declaredLabel == nil { return (false, "No usable Label") }
+        return (true, "Valid · \(Doctor.abbreviate(def.url.deletingLastPathComponent().path))")
     }
 
     func layerRow(_ name: String, passed: Bool?, value: String) -> some View {
@@ -283,6 +338,78 @@ struct InspectorView: View {
             logModified = RunObserver.logStamp(job)
             if !follow { break }
             try? await Task.sleep(for: .seconds(2))
+        }
+    }
+}
+
+/// "14:02:11: Stopped · PID 1234 quit after 1.2 s", with the useful next step.
+struct OutcomeLine: View {
+    @Environment(AppModel.self) private var model
+    let job: Job
+    let outcome: ActionOutcome
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text("\(outcome.finished.formatted(date: .omitted, time: .standard)): \(outcome.report.summary)")
+                    .font(.caption)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: icon).foregroundStyle(color)
+            }
+            .help(help)
+            .accessibilityElement(children: .combine)
+            if let failure = outcome.failure {
+                DisclosureGroup("Details") {
+                    Text(failure.details)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.caption)
+            }
+            switch outcome.followUp {
+            case .forceQuit? where job.pid != nil && !model.isBusy(job):
+                Button("Force Quit") { model.forceQuit(job) }
+                    .controlSize(.small)
+                    .tint(.red)
+                    .help("Send SIGKILL: it quits at once, without cleaning up (⌥⌘.)")
+            case .keepItOff? where !job.isDisabled && !job.scope.isReadOnly && !model.isBusy(job):
+                Button("Keep It Off") { model.perform(.keepOff, on: job) }
+                    .controlSize(.small)
+                    .help("Disable it so launchd doesn’t start it again, not even at \(job.scope.isDaemon ? "boot" : "login").")
+            default:
+                EmptyView()
+            }
+        }
+    }
+
+    var icon: String {
+        switch outcome.report.tone {
+        case .success: "checkmark.circle.fill"
+        case .info: "info.circle"
+        case .warning, .failure: "exclamationmark.triangle.fill"
+        }
+    }
+
+    var color: Color {
+        switch outcome.report.tone {
+        case .success: .green
+        case .info: .secondary
+        case .warning, .failure: .orange
+        }
+    }
+
+    var help: String {
+        switch outcome.report.result {
+        case "restartedByLaunchd":
+            "Its KeepAlive setting, its app, or another tool started it again. Turn off Keep this job active to keep it off."
+        case "didNotStart":
+            "launchd recorded no new launch. It may be throttling restarts (at most every \(job.definition.throttleInterval) s), or the job is disabled."
+        default:
+            outcome.failure?.details ?? (outcome.commands.isEmpty ? "" : "Ran:\n" + outcome.commands.map(Shell.commandLine).joined(separator: "\n"))
         }
     }
 }

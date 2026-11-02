@@ -30,13 +30,13 @@ public enum Inventory {
     public static func load(_ options: Options = Options()) -> [Job] {
         // Each domain is listed once, then joined per job.
         let domains = Set(options.scopes.map(\.domain))
-        var services: [String: [String: ServiceListing]] = [:]
+        var services: [String: [String: ServiceListing]?] = [:]
         var overrides: [String: [String: Bool]] = [:]
         let lock = NSLock()
         DispatchQueue.concurrentPerform(iterations: domains.count * 2) { i in
             let domain = Array(domains)[i / 2]
             if i % 2 == 0 {
-                let s = Launchctl.services(in: domain)
+                let s = Launchctl.servicesIfListed(in: domain)
                 lock.lock(); services[domain] = s; lock.unlock()
             } else {
                 let o = Launchctl.disabledOverrides(in: domain)
@@ -49,9 +49,16 @@ public enum Inventory {
         DispatchQueue.concurrentPerform(iterations: defs.count) { i in
             let def = defs[i]
             let domain = def.scope.domain
-            let listing = services[domain]?[def.label]
+            var listing: ServiceListing?
             var detail: ServiceDetail?
-            if listing != nil, options.details, !def.scope.isApple {
+            if let label = def.lookupLabel {
+                if let listed = services[domain] ?? nil {
+                    listing = listed[label]
+                } else if let (l, d) = Launchctl.listing(fromDetailOf: "\(domain)/\(label)", label: label) {
+                    (listing, detail) = (l, d)
+                }
+            }
+            if listing != nil, detail == nil, options.details, !def.scope.isApple {
                 detail = Launchctl.detail(target: "\(domain)/\(def.label)")
             }
             var job = Job(definition: def, listing: listing, detail: detail, override: overrides[domain]?[def.label])
@@ -65,10 +72,30 @@ public enum Inventory {
     public static func reload(_ job: Job, background: BackgroundItems.Snapshot? = nil) -> Job {
         let def = JobDefinition.load(url: job.definition.url, scope: job.scope)
         let domain = job.scope.domain
-        let listing = Launchctl.services(in: domain)[def.label]
-        let detail = listing != nil ? Launchctl.detail(target: "\(domain)/\(def.label)") : nil
+        var listing: ServiceListing?
+        var detail: ServiceDetail?
+        if let label = def.lookupLabel {
+            if let listed = Launchctl.servicesIfListed(in: domain) {
+                listing = listed[label]
+                detail = listing != nil ? Launchctl.detail(target: "\(domain)/\(def.label)") : nil
+            } else if let (l, d) = Launchctl.listing(fromDetailOf: "\(domain)/\(label)", label: label) {
+                (listing, detail) = (l, d)
+            }
+        }
         var fresh = Job(definition: def, listing: listing, detail: detail, override: Launchctl.disabledOverrides(in: domain)[def.label])
         fresh.background = background.map { $0.item(for: fresh) } ?? job.background
+        return fresh
+    }
+
+    /// The job's live launchd state, keeping the definition it was given (the copy
+    /// launchd loaded, when the plist has since been edited).
+    public static func refreshState(_ job: Job) -> Job {
+        let domain = job.scope.domain
+        let listing = Launchctl.servicesIfListed(in: domain).map { $0[job.label] }
+            ?? Launchctl.listing(fromDetailOf: job.target, label: job.label)?.0
+        let detail = listing != nil ? Launchctl.detail(target: job.target) : nil
+        var fresh = Job(definition: job.definition, listing: listing, detail: detail, override: Launchctl.disabledOverrides(in: domain)[job.label])
+        fresh.background = job.background
         return fresh
     }
 

@@ -9,6 +9,7 @@ enum Exit {
     static let authorization: Int32 = 4
     static let launchd: Int32 = 5
     static let problems: Int32 = 6
+    static let timedOut: Int32 = 7
 
     static func code(for error: Error) -> Int32 {
         switch error as? LDError {
@@ -16,6 +17,9 @@ enum Exit {
         case .ambiguous, .invalid: usage
         case .authorizationCancelled, .readOnly: authorization
         case .launchd: launchd
+        case .launchctl(let f) where f.status == Shell.timedOutStatus: timedOut
+        case .launchctl(let f) where f.status == 1 || f.status == 150: authorization
+        case .launchctl: launchd
         default: general
         }
     }
@@ -39,13 +43,103 @@ struct Style {
     static func status(_ s: JobStatus) -> String {
         switch s {
         case .running: green("● running ")
+        case .stopping: dim("◍ stopping")
+        case .restarting: green("↻ restart ")
         case .idle: dim("○ idle    ")
         case .failed: orange("▲ failed  ")
         case .disabled: dim("‖ disabled")
         case .blocked: orange("⊘ blocked ")
         case .notLoaded: dim("◌ unloaded")
         case .invalid: purple("◆ invalid ")
+        case .placeholder: dim("· empty   ")
         }
+    }
+}
+
+/// One self-overwriting dim progress line on stderr while waiting, only on a terminal.
+final class Progress: @unchecked Sendable {
+    /// The line on screen now, so an error can clear it before printing.
+    nonisolated(unsafe) static var current: Progress?
+    let label: String
+    let enabled: Bool
+    private var shown = false
+
+    init(label: String, enabled: Bool) {
+        self.label = label
+        self.enabled = enabled && isatty(STDERR_FILENO) != 0
+        Progress.current = self
+    }
+
+    func show(_ text: String) {
+        guard enabled else { return }
+        shown = true
+        FileHandle.standardError.write(Data(("\r\u{1B}[2K" + Style.dim("\(label): \(text)")).utf8))
+    }
+
+    func clear() {
+        guard shown else { return }
+        shown = false
+        FileHandle.standardError.write(Data("\r\u{1B}[2K".utf8))
+    }
+}
+
+struct ActionJSON: Encodable {
+    let action: String
+    let label: String
+    let result: String
+    let tone: String
+    let summary: String
+    let short: String
+    let timedOut: Bool
+    let offerForceQuit: Bool
+    let offerKeepOff: Bool
+    let pidBefore: Int?
+    let pid: Int?
+    let lastExit: Int?
+    let seconds: Double
+    let commands: [[String]]
+    let job: JobJSON
+
+    init(action: String, label: String, report: ActionReport, before: Job, commands: [[String]], seconds: Double, after: Job) {
+        self.action = action
+        self.label = label
+        result = report.result
+        tone = report.tone.rawValue
+        summary = report.summary
+        short = report.short
+        timedOut = report.timedOut
+        offerForceQuit = report.offerForceQuit
+        offerKeepOff = report.offerKeepOff
+        pidBefore = before.pid
+        pid = after.pid
+        lastExit = after.lastExit
+        self.seconds = (seconds * 10).rounded() / 10
+        self.commands = commands
+        job = JobJSON(after)
+    }
+
+    // Keep null values, so scripts can rely on every key being present.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(action, forKey: .action)
+        try c.encode(label, forKey: .label)
+        try c.encode(result, forKey: .result)
+        try c.encode(tone, forKey: .tone)
+        try c.encode(summary, forKey: .summary)
+        try c.encode(short, forKey: .short)
+        try c.encode(timedOut, forKey: .timedOut)
+        try c.encode(offerForceQuit, forKey: .offerForceQuit)
+        try c.encode(offerKeepOff, forKey: .offerKeepOff)
+        try c.encode(pidBefore, forKey: .pidBefore)
+        try c.encode(pid, forKey: .pid)
+        try c.encode(lastExit, forKey: .lastExit)
+        try c.encode(seconds, forKey: .seconds)
+        try c.encode(commands, forKey: .commands)
+        try c.encode(job, forKey: .job)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case action, label, result, tone, summary, short, timedOut, offerForceQuit, offerKeepOff, pidBefore, pid, lastExit, seconds, commands, job
     }
 }
 
@@ -99,11 +193,13 @@ struct DiagnosisJSON: Encodable {
     struct F: Encodable { let severity: String; let headline: String; let detail: String; let fixes: [String] }
     struct C: Encodable { let name: String; let passed: Bool?; let note: String? }
     let label: String
+    let dismissedAt: Date?
     let findings: [F]
     let checks: [C]
 
-    init(_ d: Diagnosis) {
+    init(_ d: Diagnosis, dismissals: [Dismissal] = []) {
         label = d.job.label
+        dismissedAt = d.dismissedAt(dismissals)
         findings = d.findings.map { F(severity: "\($0.severity)", headline: $0.headline, detail: $0.detail, fixes: $0.fixes.map(\.title)) }
         checks = d.checks.map { C(name: $0.name, passed: $0.passed, note: $0.note) }
     }

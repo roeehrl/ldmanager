@@ -560,10 +560,11 @@ struct EditorView: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(draft.isNew ? "Create" : (draft.loadAfterSave ? "Save & Reload" : "Save")) { save() }
+                let busy = draft.job.flatMap { model.operations[$0.id] }
+                Button(busy.map { "Wait for \($0.kind.verb) to finish" } ?? (draft.isNew ? "Create" : (draft.loadAfterSave ? "Save & Reload" : "Save"))) { save() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(saving || draft.validationError != nil || (!draft.isNew && changes.isEmpty))
+                    .disabled(busy != nil || saving || draft.validationError != nil || (!draft.isNew && changes.isEmpty))
             }
         }
         .padding(.horizontal, 22)
@@ -593,16 +594,13 @@ struct EditorView: View {
             do {
                 try await Task.detached {
                     try PlistEditor.write(dict, to: url, scope: scope)
-                    let def = JobDefinition.load(url: url, scope: scope)
-                    if let job {
-                        if reload && job.isLoaded {
-                            try Launchctl.perform(.unload, on: job)
-                            try Launchctl.perform(.load, on: Inventory.reload(Job(definition: def, listing: nil, detail: nil, override: job.override)))
-                        }
-                    } else if reload {
+                    if job == nil && reload {
+                        let def = JobDefinition.load(url: url, scope: scope)
                         try Launchctl.perform(.enable, on: Job(definition: def, listing: nil, detail: nil, override: nil))
                     }
                 }.value
+                // An edited job reloads as an operation, so the inspector shows it waiting for the old copy to quit.
+                if let job, reload, job.isLoaded { model.reload(job) }
                 await model.refresh()
                 model.selectedJobID = url.path
                 dismiss()

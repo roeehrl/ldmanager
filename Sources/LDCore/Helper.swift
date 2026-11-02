@@ -31,7 +31,7 @@ public enum HelperPolicy {
     public static let jobDirectories = ["/Library/LaunchDaemons", "/Library/LaunchAgents"]
     /// Where the helper may create folders (for job logs).
     public static let directoryPrefixes = ["/Library/", "/usr/local/", "/opt/", "/private/var/log/", "/var/log/", "/Users/Shared/"]
-    static let signals: Set<String> = ["SIGTERM", "SIGKILL", "SIGINT", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2", "15", "9", "2", "1"]
+    public static let signals: Set<String> = ["SIGTERM", "SIGKILL", "SIGINT", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2", "15", "9", "2", "1"]
 
     /// Only LD Manager and its bundled ldm, signed by the helper's own team.
     public static func clientRequirement(team: String) -> String {

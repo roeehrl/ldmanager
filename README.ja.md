@@ -118,8 +118,11 @@ ldm logs backup -f
 ```text
 ldm list [--status failed|running|disabled|problems] [--scope user|allUsers|system] [--json|--plain]
 ldm show <job> [--json] [--background]
-ldm doctor [<job>] [--json] [--background]
-ldm start|stop|restart|load|unload|enable|disable <job> [--dry-run]
+ldm doctor [<job>] [--all] [--json] [--background]
+ldm dismiss|restore <job>
+ldm start|restart|reload|load|unload|enable|disable <job> [--dry-run] [--json]
+ldm stop <job> [--force] [--timeout <s>] [--no-wait] [--dry-run] [--json]
+ldm signal <job> <HUP|INT|TERM|USR1|USR2|…>
 ldm logs <job> [-n 40] [-f]
 ldm new <name> (--every 15m | --cron "30 9 * * 1" | --keep-alive | --watch <path>) [--log <file>] -- <program> [args…]
 ldm edit <job> [--program <path>] [--every …] [--log <file>] [--dry-run]
@@ -141,6 +144,8 @@ ldm helper
 | 4 | 管理者の認証が必要、またはキャンセルされた |
 | 5 | launchd が操作を拒否した |
 | 6 | `doctor` が問題を検出した |
+| 7 | launchd の応答待ちでタイムアウトした（SIGTERM を無視するジョブなど） |
+| 64 | 引数が正しくない |
 
 <a id="why-not-launchcontrol-lingon-or-launchctl"></a>
 
