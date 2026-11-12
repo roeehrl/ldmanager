@@ -1,0 +1,27 @@
+<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>LD Manager</title>
+        <item>
+            <title>0.1.4</title>
+            <pubDate>Thu, 12 Nov 2026 15:24:21 +0200</pubDate>
+            <link>https://github.com/roeehrl/ldmanager</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/roeehrl/ldmanager/releases/tag/v0.1.4</sparkle:fullReleaseNotesLink>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>0.1.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## LD Manager 0.1.4
+
+- **Automatic updates.** LD Manager now keeps itself up to date. Once a day it checks for a new version, downloads it in the background, and installs it when you quit or when it's idle in the menu bar. Every update must carry the project's signature. Turn it off in Settings › Software Update.
+- **Problems looks like the rest of the app.** The Problems tab is a sortable table, with each problem's checks and fixes in the inspector. Dismissed problems appear with Show Dismissed.
+- After an update, the privileged helper switches to the new version by itself.
+]]></description>
+            <enclosure url="https://github.com/roeehrl/ldmanager/releases/download/v0.1.4/LD-Manager.dmg" length="4620739" type="application/octet-stream" sparkle:edSignature="1kpJ2qU/zNE6XOlOJL2flplqxGaaCr6U1FZBgB6grpILXN7C5vj6UKFoSNaF6I51j/mt2LEEb1cBZLACsjc4CQ=="></enclosure>
+        </item>
+    </channel>
+</rss><!-- sparkle-signatures:
+edSignature: DOSVMhEhTwQLrJrmakaDE5ejSBMua1HP9JHQxoIvFtr8jcINe4A14bRgyeqECZ3l26Hw4rPR6Ce+UrvMjNbTCw==
+length: 1972
+-->
