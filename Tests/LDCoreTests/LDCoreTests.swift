@@ -441,3 +441,21 @@ import Testing
         #expect(d.isEmpty)
     }
 }
+
+@Suite struct UpdatedHelper {
+    @Test func versionReplies() {
+        #expect(HelperPolicy.build(fromVersion: "1+5") == "5")
+        #expect(HelperPolicy.build(fromVersion: "1") == nil)  // helpers before build 5
+        #expect(HelperPolicy.build(fromVersion: "2+12") == "12")
+    }
+
+    @Test func buildFromExecutableInsideApp() throws {
+        let app = FileManager.default.temporaryDirectory.appendingPathComponent("ldm-test-\(UUID().uuidString)/X.app")
+        defer { try? FileManager.default.removeItem(at: app.deletingLastPathComponent()) }
+        let helpers = app.appendingPathComponent("Contents/Helpers")
+        try FileManager.default.createDirectory(at: helpers, withIntermediateDirectories: true)
+        try (["CFBundleVersion": "7"] as NSDictionary).write(to: app.appendingPathComponent("Contents/Info.plist"))
+        #expect(HelperPolicy.bundleBuild(executable: helpers.appendingPathComponent("ldm").path) == "7")
+        #expect(HelperPolicy.bundleBuild(executable: "/usr/bin/true") == nil)
+    }
+}

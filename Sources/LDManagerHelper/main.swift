@@ -6,6 +6,9 @@ import Foundation
 import LDCore
 import Security
 
+/// Read once at start: after an update swaps the bundle, this still names the build that is running.
+let startedBuild = HelperPolicy.bundleBuild() ?? "0"
+
 final class Helper: NSObject, NSXPCListenerDelegate, LDHelperProtocol {
     private let lock = NSLock()
     private var openConnections = 0
@@ -37,7 +40,16 @@ final class Helper: NSObject, NSXPCListenerDelegate, LDHelperProtocol {
     }
 
     func version(reply: @escaping (String) -> Void) {
-        reply(HelperPolicy.version)
+        reply("\(HelperPolicy.version)+\(startedBuild)")
+    }
+
+    func exitForUpdate(reply: @escaping (Bool) -> Void) {
+        lock.lock()
+        let others = openConnections > 1
+        lock.unlock()
+        reply(!others)
+        guard !others else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exit(0) }
     }
 
     func launchctl(_ arguments: [String], reply: @escaping (Int32, String, String) -> Void) {

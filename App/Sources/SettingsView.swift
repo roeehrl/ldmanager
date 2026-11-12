@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(AppUpdater.self) private var updater
     @AppStorage("refreshInterval") private var refreshInterval = 5.0
     @State private var cliStatus = CLIInstaller.status
     @State private var confirmRemoveHelper = false
@@ -10,7 +11,28 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Updates") {
+            Section("Software Update") {
+                Toggle("Check for updates automatically", isOn: Binding(get: { updater.automaticallyChecks },
+                                                                         set: { updater.setAutomaticallyChecks($0) }))
+                    .disabled(updater.isManaged)
+                Toggle("Download and install updates automatically", isOn: Binding(get: { updater.automaticallyInstalls },
+                                                                                   set: { updater.setAutomaticallyInstalls($0) }))
+                    .disabled(updater.isManaged || !updater.automaticallyChecks)
+                LabeledContent("Version", value: updater.version)
+                LabeledContent("Last checked") {
+                    HStack {
+                        Text(updater.lastCheck.map { $0.formatted(.relative(presentation: .named)) } ?? "Never")
+                            .foregroundStyle(.secondary)
+                        Button("Check Now") { updater.checkForUpdates() }
+                            .disabled(!updater.canCheck)
+                    }
+                }
+                Text(updater.isManaged
+                     ? "Managed by your organization."
+                     : "Once a day LD Manager asks GitHub whether a newer version exists. Updates must carry the project’s signature, and install when you quit or when LD Manager is idle in the menu bar. Nothing else is sent.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Job list") {
                 Picker("Refresh job state every", selection: $refreshInterval) {
                     Text("2 seconds").tag(2.0)
                     Text("5 seconds").tag(5.0)

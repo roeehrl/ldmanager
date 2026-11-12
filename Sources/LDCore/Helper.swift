@@ -5,7 +5,11 @@ import Security
 /// command line: the helper decides what runs, and `HelperPolicy` validates
 /// each request before it does anything.
 @objc public protocol LDHelperProtocol {
+    /// "<protocol version>+<app build>", e.g. "1+5". Helpers before build 5 reply "1".
     func version(reply: @escaping (String) -> Void)
+    /// Quits so launchd starts the copy in the (updated) app bundle on the next request.
+    /// Replies false while another client is connected. Added in build 5.
+    func exitForUpdate(reply: @escaping (Bool) -> Void)
     /// launchctl verbs on the system domain only. Replies (status, stdout, stderr).
     func launchctl(_ arguments: [String], reply: @escaping (Int32, String, String) -> Void)
     /// Writes a job plist into /Library/LaunchDaemons or /Library/LaunchAgents as root:wheel 0644.
@@ -27,6 +31,27 @@ public enum HelperPolicy {
     public static let appIdentifier = "io.github.roeehrl.ldmanager"
     public static let cliIdentifier = "io.github.roeehrl.ldmanager.ldm"
     public static let version = "1"
+
+    /// The build (CFBundleVersion) of the LD Manager.app containing this executable,
+    /// found from the executable's own path so it works for the app, ldm and the helper.
+    public static func bundleBuild(executable: String? = Bundle.main.executablePath) -> String? {
+        guard let exe = executable.map({ URL(fileURLWithPath: $0).resolvingSymlinksInPath() }) else { return nil }
+        var dir = exe.deletingLastPathComponent()
+        while dir.path != "/" {
+            if dir.pathExtension == "app" {
+                let info = NSDictionary(contentsOf: dir.appendingPathComponent("Contents/Info.plist"))
+                return info?["CFBundleVersion"] as? String
+            }
+            dir = dir.deletingLastPathComponent()
+        }
+        return nil
+    }
+
+    /// The build part of a helper's version reply; nil for helpers that don't report one.
+    public static func build(fromVersion reply: String) -> String? {
+        let parts = reply.split(separator: "+", maxSplits: 1)
+        return parts.count == 2 ? String(parts[1]) : nil
+    }
 
     public static let jobDirectories = ["/Library/LaunchDaemons", "/Library/LaunchAgents"]
     /// Where the helper may create folders (for job logs).
@@ -139,6 +164,18 @@ public final class HelperClient: @unchecked Sendable {
 
     public func resetProbe() {
         lock.lock(); probed = nil; lock.unlock()
+    }
+
+    /// The build the running helper started from, or nil if it is unreachable or too old to say.
+    public func runningBuild() -> String?? {
+        let reply = call(timeout: 3, fallback: nil as String?) { proxy, done in proxy.version { done($0) } }
+        return reply.map { HelperPolicy.build(fromVersion: $0) }
+    }
+
+    /// Asks the helper to quit so launchd runs the updated copy next time. False if it
+    /// is busy with another client or is too old to know the request.
+    public func exitForUpdate() -> Bool {
+        call(timeout: 3, fallback: false) { proxy, done in proxy.exitForUpdate { done($0) } }
     }
 
     /// Calls the helper and waits for the reply. Returns `fallback` if the helper

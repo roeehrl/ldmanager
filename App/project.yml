@@ -7,6 +7,9 @@ options:
 packages:
   LDManagerPackage:
     path: ..
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.1
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -21,12 +24,26 @@ targets:
     dependencies:
       - package: LDManagerPackage
         product: LDCore
+      - package: Sparkle
+    info:
+      path: Info.plist
+      properties:
+        SUFeedURL: https://roeehrl.github.io/ldmanager/appcast.xml
+        SUPublicEDKey: "zTlAX/bV2AFHecDNaxE6yFBr6TZrpow+SNQ89NrVj60="
+        SUEnableAutomaticChecks: true
+        SUAutomaticallyUpdate: true
+        SUScheduledCheckInterval: 86400
+        SUScheduledImpatientCheckInterval: 259200
+        SUVerifyUpdateBeforeExtraction: true
+        SURequireSignedFeed: true
+        SUEnableSystemProfiling: false
+        SUShowReleaseNotes: true
     settings:
       base:
         PRODUCT_NAME: LD Manager
         PRODUCT_BUNDLE_IDENTIFIER: io.github.roeehrl.ldmanager
-        MARKETING_VERSION: "0.1.3"
-        CURRENT_PROJECT_VERSION: "4"
+        MARKETING_VERSION: "0.1.4"
+        CURRENT_PROJECT_VERSION: "5"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: LD Manager
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools

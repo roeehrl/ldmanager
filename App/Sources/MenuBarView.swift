@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @Environment(AppModel.self) private var model
+    @Environment(AppUpdater.self) private var updater
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -68,9 +69,30 @@ struct MenuBarView: View {
                 }
             }
 
+            if let version = updater.pendingVersion {
+                Button { updater.installOrShowUpdate() } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.down.circle.fill").foregroundStyle(Color.accentColor)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(updater.stagedVersion != nil ? "LD Manager \(version) is ready" : "LD Manager \(version) is available")
+                                .fontWeight(.semibold)
+                            Text(updater.stagedVersion != nil ? "Installs when you quit · click to restart now" : "Click to see what’s new and install")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                    .contentShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
+
             Divider()
             VStack(alignment: .leading, spacing: 0) {
                 menuButton("Open LD Manager", shortcut: "⌘O") { open(nil) }
+                menuButton("Check for Updates…", shortcut: "") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheck)
                 menuButton("New Job…", shortcut: "⌘N") {
                     open(nil)
                     model.editorTarget = .new
