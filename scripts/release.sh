@@ -4,6 +4,7 @@
 #   build/release/LD-Manager.dmg     the app and an Applications link in a styled window
 #   build/release/ldm-macos.zip      the ldm command on its own
 #   build/release/SHA256SUMS.txt
+#   build/release/appcast.xml        the signed Sparkle update feed (publish with scripts/publish-appcast.sh)
 #
 # Needs dmgbuild (pip install dmgbuild), a "Developer ID Application" certificate in your
 # keychain, and notarization credentials, either an App Store Connect API key:
@@ -93,6 +94,31 @@ notarize "$OUT/ldm-macos.zip"
 
 (cd "$OUT" && shasum -a 256 LD-Manager.dmg ldm-macos.zip > SHA256SUMS.txt)
 
+# 4. The update feed for Sparkle: one item, this DMG, signed with the EdDSA key in the
+#    login keychain (account "ldmanager"). Published by scripts/publish-appcast.sh once
+#    the GitHub release exists. See docs/auto-update.md.
+echo "▸ Building the update feed"
+BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")
+diff <(codesign -d -r- "$APP/Contents/MacOS/LDManagerHelper" 2>&1 | sed -n 's/^designated => //p') scripts/helper-requirement.txt \
+  || { echo "The helper's code signing requirement changed; approved helpers would stop launching." >&2; exit 1; }
+NOTES="release-notes/$VERSION.md"
+[ -f "$NOTES" ] || { echo "Missing $NOTES (Markdown shown in the update window)" >&2; exit 1; }
+SPARKLE_BIN="${SPARKLE_BIN:-build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin}"
+[ -x "$SPARKLE_BIN/generate_appcast" ] || { echo "Sparkle tools not found in $SPARKLE_BIN" >&2; exit 1; }
+STAGE="$OUT/sparkle"
+mkdir -p "$STAGE"
+cp "$OUT/LD-Manager.dmg" "$STAGE/"
+cp "$NOTES" "$STAGE/LD-Manager.md"
+"$SPARKLE_BIN/generate_appcast" --account ldmanager \
+  --download-url-prefix "https://github.com/roeehrl/ldmanager/releases/download/v$VERSION/" \
+  --link "https://github.com/roeehrl/ldmanager" \
+  --full-release-notes-url "https://github.com/roeehrl/ldmanager/releases/tag/v$VERSION" \
+  --embed-release-notes --maximum-deltas 0 \
+  -o "$OUT/appcast.xml" "$STAGE" >/dev/null
+rm -rf "$STAGE"
+grep -q "<sparkle:version>$BUILD</sparkle:version>" "$OUT/appcast.xml" || { echo "appcast.xml doesn't name build $BUILD" >&2; exit 1; }
+grep -q 'sparkle:edSignature=' "$OUT/appcast.xml" || { echo "appcast.xml enclosure isn't signed" >&2; exit 1; }
+
 echo "▸ Verifying"
 spctl -a -vv "$APP" 2>&1 | sed 's/^/  /'
 spctl -a -vv -t open --context context:primary-signature "$OUT/LD-Manager.dmg" 2>&1 | sed 's/^/  /'
@@ -101,3 +127,4 @@ xcrun stapler validate "$OUT/LD-Manager.dmg" | sed 's/^/  /'
 
 echo "✓ $OUT"
 cat "$OUT/SHA256SUMS.txt"
+echo "Next: gh release create v$VERSION $OUT/LD-Manager.dmg $OUT/ldm-macos.zip $OUT/SHA256SUMS.txt …, then scripts/publish-appcast.sh"

@@ -183,8 +183,17 @@ are read-only; changes to system daemons and `/Library` go through macOS's admin
 prompt or the optional helper you approve once.
 
 **Does it send anything anywhere?**
-No. It makes no network connections and has no analytics. It reads launchd's state with
-`launchctl` and your plist files on disk.
+Only to keep itself up to date. About once a day the app downloads a small signed file
+(`appcast.xml`) from this project's GitHub Pages site; if a newer version exists, it
+downloads it from GitHub Releases and installs it when you quit, or when LD Manager is idle in
+the menu bar. These requests carry what any download does (your IP address and a user agent
+naming the app and its version): no identifiers, no system profile, no analytics. Every
+update must carry this project's signature and its Developer ID code signature, and older
+versions are refused. Turn it off in Settings › Software Update, or for a whole organisation with a
+configuration profile that sets `SUEnableAutomaticChecks` to false (and `UpdatesDisabled` to
+true to block manual checks) for `io.github.roeehrl.ldmanager`. The `ldm` command never
+connects to the network. Apart from that, LD Manager reads launchd's state with `launchctl`
+and your plist files on disk.
 
 **Why does it need macOS 26?**
 It uses the current SwiftUI and the Login Items (Background Task Management) behaviour of

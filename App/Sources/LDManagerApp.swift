@@ -3,27 +3,50 @@ import SwiftUI
 
 @main
 struct LDManagerApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
+    @State private var updater: AppUpdater
+    /// After a silent update the app comes back to the menu bar only, as it was.
+    private let relaunchedForUpdate: Bool
+
+    init() {
+        let model = AppModel()
+        let updater = AppUpdater()
+        updater.model = model
+        _model = State(initialValue: model)
+        _updater = State(initialValue: updater)
+        relaunchedForUpdate = AppUpdater.consumeRelaunchFlag()
+    }
 
     var body: some Scene {
         Window("LD Manager", id: "main") {
             ContentView()
                 .environment(model)
+                .environment(updater)
                 .frame(minWidth: 980, minHeight: 600)
         }
         .defaultSize(width: 1360, height: 860)
-        .commands { JobCommands(model: model) }
+        .defaultLaunchBehavior(relaunchedForUpdate ? .suppressed : .automatic)
+        .commands {
+            JobCommands(model: model)
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheck)
+            }
+        }
 
         Settings {
             SettingsView()
                 .environment(model)
+                .environment(updater)
         }
 
         MenuBarExtra {
             MenuBarView()
                 .environment(model)
+                .environment(updater)
         } label: {
-            Image(systemName: model.diagnoses.isEmpty ? "square.stack.3d.up" : "square.stack.3d.up.trianglebadge.exclamationmark")
+            Image(systemName: updater.pendingVersion != nil ? "arrow.down.circle"
+                  : model.diagnoses.isEmpty ? "square.stack.3d.up" : "square.stack.3d.up.trianglebadge.exclamationmark")
         }
         .menuBarExtraStyle(.window)
     }

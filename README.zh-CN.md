@@ -166,7 +166,7 @@ ldm helper
 每次保存都会先显示差异并保留备份；签名系统宗卷上的 Apple 任务是只读的；对系统 LaunchDaemon 和 `/Library` 的修改，会通过 macOS 的管理员授权提示，或者经由你只需批准一次的可选辅助程序进行。
 
 **它会往外发送任何数据吗？**
-不会。它不建立任何网络连接，也没有任何统计分析。它通过 `launchctl` 读取 launchd 的状态，并读取你磁盘上的 plist 文件。
+只用于自动更新。应用大约每天一次从本项目的 GitHub Pages 下载一个带签名的小文件（`appcast.xml`）；如果有新版本，就从 GitHub Releases 下载，并在你退出应用或它在菜单栏空闲时安装。这些请求只包含任何下载都会带的信息（你的 IP 地址，以及包含应用名称和版本的 User-Agent），没有标识符、系统信息或统计分析。每个更新都必须带有本项目的签名和 Developer ID 代码签名，旧版本会被拒绝。可以在“设置”›“软件更新”中关闭；整个组织可以用配置描述文件，为 `io.github.roeehrl.ldmanager` 把 `SUEnableAutomaticChecks` 设为 false（要同时禁止手动检查，再把 `UpdatesDisabled` 设为 true）。`ldm` 命令从不联网。除此之外，它通过 `launchctl` 读取 launchd 的状态，并读取你磁盘上的 plist 文件。
 
 **为什么需要 macOS 26？**
 它使用了最新的 SwiftUI，以及新版 macOS 中登录项（Background Task Management）的行为。是否支持更早的版本可以讨论——请参阅“参与贡献”。

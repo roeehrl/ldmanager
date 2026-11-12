@@ -214,12 +214,55 @@ final class AppModel {
         HelperClient.shared.resetProbe()
         if await Task.detached(operation: { HelperClient.shared.isAvailable }).value {
             helperState = .enabled
+            await replaceOutdatedHelper()
             return
         }
         helperState = .broken
         guard !repairAttempted else { return }
         repairAttempted = true
         await repairHelper()
+    }
+
+    /// After an update, launchd may still be running the previous helper. Ask it to
+    /// quit so the next request starts the copy in this bundle. A helper from before
+    /// 0.1.4 doesn't know that request (and every check would keep it from idling
+    /// out), so have launchd restart it instead. Re-register only if the new build
+    /// still doesn't answer.
+    func replaceOutdatedHelper() async {
+        guard let mine = HelperPolicy.bundleBuild() else { return }
+        func running() async -> String?? { await Task.detached { HelperClient.shared.runningBuild() }.value }
+        guard let reply = await running(), reply != mine else { return }
+        if reply == nil {
+            // Before 0.1.4: no exit request. The connection drops as launchd restarts it; that's expected.
+            _ = await Task.detached {
+                Privileged.launchctl([["/bin/launchctl", "kickstart", "-k", "system/\(HelperPolicy.machService)"]])
+            }.value
+        } else {
+            // It declines while another client (ldm, an operation) is connected; try again shortly.
+            for _ in 0..<10 {
+                if await Task.detached(operation: { HelperClient.shared.exitForUpdate() }).value { break }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        for _ in 0..<15 {
+            try? await Task.sleep(for: .seconds(1))
+            if let now = await running(), now == mine { return }
+        }
+        guard !repairAttempted else { return }
+        repairAttempted = true
+        await repairHelper()
+    }
+
+    /// Before installing an update: let the helper quit, so it isn't running from the old bundle.
+    func prepareHelperForUpdate() async {
+        guard helperState == .enabled else { return }
+        _ = await Task.detached { HelperClient.shared.exitForUpdate() }.value
+    }
+
+    /// Nothing the user would lose by a silent relaunch: no window, sheet or running action.
+    var isIdleForUpdate: Bool {
+        operations.isEmpty && !isSheetOpen && editorTarget == nil && !NSApp.isHidden
+            && !NSApp.windows.contains { ($0.isVisible || $0.isMiniaturized) && $0.canBecomeMain && !($0 is NSPanel) }
     }
 
     /// Unregisters and registers the helper again from this copy of the app.

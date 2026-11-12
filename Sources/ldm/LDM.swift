@@ -24,7 +24,7 @@ struct LDM: ParsableCommand {
         6 doctor found problems · 7 timed out waiting for launchd ·
         64 invalid arguments.
         """,
-        version: "0.1.3",
+        version: "0.1.4",
         subcommands: [List.self, Show.self, Doctor.self, Start.self, Stop.self, Restart.self, Signal.self, Reload.self, Load.self, Unload.self,
                       Enable.self, Disable.self, Logs.self, New.self, Edit.self, Remove.self, Explain.self, Dismiss.self, Restore.self, HelperStatus.self]
     )
@@ -729,11 +729,26 @@ struct HelperStatus: ParsableCommand {
         if restart, HelperClient.shared.isAvailable {
             // The helper restarts itself; the connection drops as it exits, which is expected.
             _ = Privileged.launchctl([["/bin/launchctl", "kickstart", "-k", "system/\(HelperPolicy.machService)"]])
-            HelperClient.shared.resetProbe()
-            Thread.sleep(forTimeInterval: 1)
+            // launchd starts it again on the next request; give it a few seconds.
+            for _ in 0..<10 {
+                Thread.sleep(forTimeInterval: 0.5)
+                HelperClient.shared.resetProbe()
+                if HelperClient.shared.isAvailable { break }
+            }
         }
         if HelperClient.shared.isAvailable {
             print(Style.green("✓ ") + "helper reachable — system changes and Login Items checks won’t prompt")
+            let mine = HelperPolicy.bundleBuild()
+            switch HelperClient.shared.runningBuild() {
+            case let running?? where mine != nil && running != mine:
+                print(Style.orange("▲ ") + "helper is running build \(running), this ldm is build \(mine!) — `ldm helper --restart` switches to the current one")
+            case .some(nil) where mine != nil:
+                print(Style.orange("▲ ") + "helper is from an older LD Manager — `ldm helper --restart` switches to the current one")
+            case let running??:
+                print(Style.dim("  build \(running)"))
+            default:
+                break
+            }
         } else {
             print("helper not reachable — install and approve it in LD Manager (sidebar or Settings)")
             throw ExitCode(Exit.authorization)

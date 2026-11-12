@@ -53,6 +53,19 @@ else
   echo "▸ Signing with “$SIGN_IDENTITY”"
   FLAGS=(--force --options runtime --timestamp)
 fi
+# Sparkle's nested code, innermost first (Xcode signed it ad hoc). Never --deep.
+FW="$APP/Contents/Frameworks/Sparkle.framework"
+if [ -d "$FW" ]; then
+  codesign "${FLAGS[@]}" --sign "$SIGN_IDENTITY" "$FW/Versions/B/XPCServices/Installer.xpc"
+  codesign "${FLAGS[@]}" --sign "$SIGN_IDENTITY" --preserve-metadata=entitlements "$FW/Versions/B/XPCServices/Downloader.xpc"
+  codesign "${FLAGS[@]}" --sign "$SIGN_IDENTITY" "$FW/Versions/B/Autoupdate"
+  codesign "${FLAGS[@]}" --sign "$SIGN_IDENTITY" "$FW/Versions/B/Updater.app"
+  codesign "${FLAGS[@]}" --sign "$SIGN_IDENTITY" "$FW"
+fi
+for key in SUFeedURL SUPublicEDKey SURequireSignedFeed; do
+  /usr/libexec/PlistBuddy -c "Print :$key" "$APP/Contents/Info.plist" >/dev/null 2>&1 \
+    || { echo "Info.plist is missing $key" >&2; exit 1; }
+done
 codesign "${FLAGS[@]}" --sign "$SIGN_IDENTITY" --identifier io.github.roeehrl.ldmanager.ldm "$APP/Contents/Helpers/ldm"
 codesign "${FLAGS[@]}" --sign "$SIGN_IDENTITY" --identifier "$HELPER_LABEL" "$APP/Contents/MacOS/LDManagerHelper"
 codesign "${FLAGS[@]}" --sign "$SIGN_IDENTITY" "$APP"
