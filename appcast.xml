@@ -4,24 +4,22 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>LD Manager</title>
         <item>
-            <title>0.1.4</title>
-            <pubDate>Thu, 12 Nov 2026 15:24:21 +0200</pubDate>
+            <title>0.1.5</title>
+            <pubDate>Fri, 13 Nov 2026 15:40:48 +0200</pubDate>
             <link>https://github.com/roeehrl/ldmanager</link>
-            <sparkle:fullReleaseNotesLink>https://github.com/roeehrl/ldmanager/releases/tag/v0.1.4</sparkle:fullReleaseNotesLink>
-            <sparkle:version>5</sparkle:version>
-            <sparkle:shortVersionString>0.1.4</sparkle:shortVersionString>
+            <sparkle:fullReleaseNotesLink>https://github.com/roeehrl/ldmanager/releases/tag/v0.1.5</sparkle:fullReleaseNotesLink>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>0.1.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## LD Manager 0.1.4
+            <description sparkle:format="markdown"><![CDATA[## LD Manager 0.1.5
 
-- **Automatic updates.** LD Manager now keeps itself up to date. Once a day it checks for a new version, downloads it in the background, and installs it when you quit or when it's idle in the menu bar. Every update must carry the project's signature. Turn it off in Settings › Software Update.
-- **Problems looks like the rest of the app.** The Problems tab is a sortable table, with each problem's checks and fixes in the inspector. Dismissed problems appear with Show Dismissed.
-- After an update, the privileged helper switches to the new version by itself.
+- **Menu bar only.** Turn off Show in Dock in Settings › General and LD Manager lives in the menu bar; its Dock icon appears only while a window is open. Show in menu bar hides the menu bar item instead, for those who prefer the Dock.
 ]]></description>
-            <enclosure url="https://github.com/roeehrl/ldmanager/releases/download/v0.1.4/LD-Manager.dmg" length="4620739" type="application/octet-stream" sparkle:edSignature="1kpJ2qU/zNE6XOlOJL2flplqxGaaCr6U1FZBgB6grpILXN7C5vj6UKFoSNaF6I51j/mt2LEEb1cBZLACsjc4CQ=="></enclosure>
+            <enclosure url="https://github.com/roeehrl/ldmanager/releases/download/v0.1.5/LD-Manager.dmg" length="4631261" type="application/octet-stream" sparkle:edSignature="/rhHDMGc+oOhJAruuI28ZaSEvh+kaRb8sorInqk6jS2qI8wODxUIIerbh9bhWn2t7hdis318znkpstZrKKBBDg=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: DOSVMhEhTwQLrJrmakaDE5ejSBMua1HP9JHQxoIvFtr8jcINe4A14bRgyeqECZ3l26Hw4rPR6Ce+UrvMjNbTCw==
-length: 1972
+edSignature: nFzb26Xl4MyrPgk0XXUR1q12DdJ981S/oO/JpKerRIF8kVZtXErc/0nb2kTxyB+tninmhBe6jHJH3xaEdoyJAA==
+length: 1646
 -->
