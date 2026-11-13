@@ -42,8 +42,8 @@ targets:
       base:
         PRODUCT_NAME: LD Manager
         PRODUCT_BUNDLE_IDENTIFIER: io.github.roeehrl.ldmanager
-        MARKETING_VERSION: "0.1.4"
-        CURRENT_PROJECT_VERSION: "5"
+        MARKETING_VERSION: "0.1.5"
+        CURRENT_PROJECT_VERSION: "6"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: LD Manager
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools

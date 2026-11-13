@@ -24,7 +24,7 @@ struct LDM: ParsableCommand {
         6 doctor found problems · 7 timed out waiting for launchd ·
         64 invalid arguments.
         """,
-        version: "0.1.4",
+        version: "0.1.5",
         subcommands: [List.self, Show.self, Doctor.self, Start.self, Stop.self, Restart.self, Signal.self, Reload.self, Load.self, Unload.self,
                       Enable.self, Disable.self, Logs.self, New.self, Edit.self, Remove.self, Explain.self, Dismiss.self, Restore.self, HelperStatus.self]
     )

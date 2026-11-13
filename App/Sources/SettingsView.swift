@@ -5,12 +5,26 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(AppUpdater.self) private var updater
     @AppStorage("refreshInterval") private var refreshInterval = 5.0
+    @AppStorage(DockIcon.key) private var showInDock = true
+    @AppStorage(DockIcon.menuBarKey) private var showInMenuBar = true
     @State private var cliStatus = CLIInstaller.status
     @State private var confirmRemoveHelper = false
     @State private var cliError: String?
 
     var body: some View {
         Form {
+            Section("General") {
+                Toggle("Show in Dock", isOn: $showInDock)
+                    .disabled(!showInMenuBar)
+                Toggle("Show in menu bar", isOn: $showInMenuBar)
+                    .disabled(!showInDock)
+                Text(!showInDock
+                     ? "LD Manager lives in the menu bar. Its Dock icon appears only while a window is open."
+                     : !showInMenuBar
+                     ? "Open LD Manager from the Dock or the Applications folder. Problems and pinned jobs aren’t shown in the menu bar."
+                     : "Turn one off to keep LD Manager only in the menu bar or only in the Dock.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Software Update") {
                 Toggle("Check for updates automatically", isOn: Binding(get: { updater.automaticallyChecks },
                                                                          set: { updater.setAutomaticallyChecks($0) }))
