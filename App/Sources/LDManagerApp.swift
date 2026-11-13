@@ -5,6 +5,8 @@ import SwiftUI
 struct LDManagerApp: App {
     @State private var model: AppModel
     @State private var updater: AppUpdater
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @AppStorage(DockIcon.menuBarKey) private var showInMenuBar = true
     /// After a silent update the app comes back to the menu bar only, as it was.
     private let relaunchedForUpdate: Bool
 
@@ -40,7 +42,7 @@ struct LDManagerApp: App {
                 .environment(updater)
         }
 
-        MenuBarExtra {
+        MenuBarExtra(isInserted: $showInMenuBar) {
             MenuBarView()
                 .environment(model)
                 .environment(updater)
